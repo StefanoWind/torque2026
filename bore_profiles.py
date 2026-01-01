@@ -15,7 +15,7 @@ import warnings
 warnings.filterwarnings('ignore')
 matplotlib.rcParams['font.family'] = 'serif'
 matplotlib.rcParams['mathtext.fontset'] = 'cm'
-matplotlib.rcParams['font.size'] = 12
+matplotlib.rcParams['font.size'] = 14
 matplotlib.rcParams['savefig.dpi']=500
 plt.close("all")
 
@@ -242,6 +242,7 @@ for s in sites:
     plt.contour(dtheta[s].time,dtheta[s].height,dtheta[s].T,np.arange(-5,5+.1,0.25),colors='k',linewidths=1,alpha=0.25,extend='both')
     plt.plot(cbh[s].time,cbh[s]*1000,'ow',markeredgecolor='k')
     plt.gca().xaxis.set_major_formatter(mdates.DateFormatter('%H:%M'))
+    plt.xlim([Data_trp.time[0],Data_trp.time[-1]])
     plt.ylabel(r'$z$ [m]')
     plt.grid()
     plt.ylim([0,300])
