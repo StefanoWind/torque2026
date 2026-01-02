@@ -34,7 +34,7 @@ t2=4000
 skip=300#[s]
 power_rated=2800
 z_rad=100
-make_video=True
+make_video=False
 time_shift_rad=120#[s] shift radar time
 
 #graphics
@@ -184,9 +184,6 @@ sc=ax.scatter(0,0,1,c=0,cmap='plasma',vmin=0,vmax=1)
 cax=fig.add_subplot(gs[:,-1])
 plt.colorbar(sc,cax=cax,label='Normalized power')
 plt.tight_layout()
-
-
-
 
 
 if make_video:   
