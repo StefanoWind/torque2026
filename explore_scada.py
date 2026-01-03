@@ -72,10 +72,22 @@ for file in os.listdir(source):
     
 #%% Plots
 plt.close('all')
+# for v in Data.data_vars:
+#     plt.figure(figsize=(18,5))
+#     for t in turbines_sel:
+#         plt.plot(Data.time,Data[v].sel(turbine=t),label=t)
+#     plt.gca().xaxis.set_major_formatter(mdates.DateFormatter('%H:%M'))
+#     plt.grid()
+#     plt.xlabel('Time (UTC)')
+#     plt.ylabel(v)
+# plt.legend()
+
 for v in Data.data_vars:
     plt.figure(figsize=(18,5))
     for t in turbines_sel:
-        plt.plot(Data.time,Data[v].sel(turbine=t),label=t)
+        lp,=plt.plot(Data.time,Data[v].sel(turbine=t),alpha=0.1)
+        color = lp.get_color()
+        plt.plot(Data.time,Data[v].rolling(time=120,center=True).mean().sel(turbine=t),label=t,color=color)
     plt.gca().xaxis.set_major_formatter(mdates.DateFormatter('%H:%M'))
     plt.grid()
     plt.xlabel('Time (UTC)')
