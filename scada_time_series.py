@@ -26,6 +26,7 @@ source_layout=os.path.join(cd,'data','20250225_AWAKEN_layout.nc')
 turbines_sel=['A09','I02','G09']
 wf='King Plains'
 vars_sel=['WindSpeed','ActivePower']
+source_layout=os.path.join(cd,'data','20250225_AWAKEN_layout.nc')
 dt_ma=60#[s] moving average window
 
 #graphics
@@ -52,6 +53,8 @@ def three_point_star():
 
 #%% Initialization
 Turbines=xr.open_dataset(source_layout,group='turbines').rename({'Wind plant':'wind_plant'})
+
+#zeroing
 Data=xr.Dataset()
 
 #%% Main
@@ -98,7 +101,7 @@ dt=np.float64(np.mean(np.diff(Data.time.values)))/10**9
 t1=str(Data.time[0].values).replace('T','.').replace(':','').replace('-','')[:-10]
 t2=str(Data.time[-1].values).replace('T','.').replace(':','').replace('-','')[:-10]
 Data.to_netcdf(os.path.join(cd,'data','scada',t1+'.'+t2+'.scada.nc'))
-    
+
 #%% Plots
 plt.close('all')
 
@@ -133,3 +136,6 @@ plt.ylabel('S-N [m]')
 plt.xlim([625,650])
 plt.ylim([4022,4035])
 plt.gca().set_aspect('equal')
+
+    
+    

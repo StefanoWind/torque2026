@@ -1,3 +1,6 @@
+'''
+Test LASSO on synthetic data
+'''
 import numpy as np
 import matplotlib.pyplot as plt
 plt.close('all')
@@ -6,32 +9,28 @@ np.random.seed(0)
 #%% Inputs
 
 # Sparse observation points
-Nobs = 250
-x = np.random.uniform(0, 10, Nobs)
-y = np.random.uniform(0, 10, Nobs)
+N = 88
 
-# True modes: (kx, ky, amplitude, phase)
+
+# True modes: (lambda, wd, amplitude, phase)
 true_modes = [
-    (1,1,1,2),
+    (5,290,1,2),
 ]
-noise=0
+noise=0.1
 
-# Real signal
-f = np.zeros(Nobs)
-for kx, ky, A, phi in true_modes:
-    f += A * np.cos(kx*x + ky*y + phi)
-
-# Add noise
-f += noise * np.random.randn(Nobs)
 
 # Candidate wavenumbers
-k_search = np.linspace(0, 5, 51)[1:]
-theta_search=np.linspace(0,2*np.pi,361)
+lambdas=np.arange(1,25.1,1)#wavelength search space
+wds=np.arange(180,361,5)#direction search space
 
 #%% Functions
-def lasso(x,y,f,k_search,theta_search,N_grid=100):
+def lasso(x,y,f,k_search,theta_search,N_grid=100,margin=0):
+    '''
+    Identify dominant mode through LASSO
+    '''
     from sklearn.linear_model import Lasso
     
+    #make search grid
     K, THETA = np.meshgrid(k_search, theta_search, indexing="ij")
     N=len(f)
     Nk = K.size
@@ -48,7 +47,7 @@ def lasso(x,y,f,k_search,theta_search,N_grid=100):
     M = np.hstack([M_cos, M_sin])
     
     #LASSO optimization
-    lasso = Lasso(alpha=0.01, fit_intercept=False, max_iter=6000)
+    lasso = Lasso(alpha=0.1, fit_intercept=False, max_iter=6000)
     lasso.fit(M, f)
 
     coef = lasso.coef_
@@ -66,25 +65,46 @@ def lasso(x,y,f,k_search,theta_search,N_grid=100):
     
     k_dom=k_search[i]
     theta_dom=theta_search[j]
-    X,Y=np.meshgrid(np.linspace(np.min(x),np.max(x),N_grid),np.linspace(np.min(y),np.max(y),N_grid),indexing='ij')
+    
+    X,Y=np.meshgrid(np.linspace(np.min(x)-margin,np.max(x)+margin,N_grid),np.linspace(np.min(y)-margin,np.max(y)+margin,N_grid),indexing='ij')
     f_dom=A[i,j]*np.cos(k_dom*(np.cos(theta_dom)*X+np.sin(theta_dom)*Y)+phi[i,j])
     
-    return A, phi,k_dom,theta_dom, X, Y, f_dom
+    #rmse of dominant mode
+    rmse=np.sum((f-A[i,j]*np.cos(k_dom*(np.cos(theta_dom)*x+np.sin(theta_dom)*y)+phi[i,j]))**2)**0.5
+    
+    return A, phi,k_dom,theta_dom, X, Y, f_dom,rmse
+
+#%% Initialization
+x = np.random.uniform(0, 10, N)
+y = np.random.uniform(0, 10, N)
+
+# Real signal
+f = np.zeros(N)
+for l, wd, A, phi in true_modes:
+    k=2*np.pi/l
+    th=np.radians(270-wd)
+    f += A * np.cos(k*(np.cos(th)*x + np.sin(th)*y) + phi)
+
+# Add noise
+f += noise * np.random.randn(N)
 
 #%% Main
-A, phi,k_dom,theta_dom, X, Y, f_dom=lasso(x,y,f,k_search,theta_search)
+A, phi, k_dom, theta_dom, X, Y, f_dom, rmse=lasso(x,y,f,2*np.pi/lambdas,np.radians(270-wds))
+lambda_dom=2*np.pi/k_dom
+wd_dom=(270-np.degrees(theta_dom))%360
 
 #%% Plots
 fig=plt.figure(figsize=(12,5))
 plt.subplot(1,2,1)
-plt.pcolor(X,Y,f_dom,cmap='seismic',vmin=np.min(f),vmax=np.max(f))
-plt.scatter(x,y,s=10,c=f,cmap='seismic',vmin=np.min(f),vmax=np.max(f),linewidth=2)
+pc=plt.pcolor(X,Y,f_dom,vmin=-np.percentile(np.abs(f),90),vmax=np.percentile(np.abs(f),90),cmap='seismic')
+plt.scatter(x,y,s=20,c=f,vmin=-np.percentile(np.abs(f),90),vmax=np.percentile(np.abs(f),90),cmap='seismic',edgecolor='w')
 plt.colorbar(label=r"$f$")
 
 ax = fig.add_subplot(1,2,2,projection='polar')
-pcm = ax.pcolormesh(theta_search, k_search, A, shading='auto', cmap='hot')
-plt.plot(theta_dom,k_dom,'xg')
-plt.colorbar(pcm,label=r'$f$')
+pcm = ax.pcolormesh(np.radians(wds), lambdas, A, shading='auto', cmap='hot')
+plt.plot(np.radians(wd_dom),lambda_dom,'xg')
+ax.set_theta_zero_location('N')
+ax.set_theta_direction(-1)
 plt.show()
 
 
