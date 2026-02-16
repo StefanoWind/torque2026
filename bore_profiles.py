@@ -174,7 +174,7 @@ plt.ylim([0,2000])
 ax.set_xticklabels([])
 plt.xlim([Data_trp.time[0],Data_trp.time[-1]])
 cax=fig.add_subplot(gs[1,1])
-plt.colorbar(cf,cax=cax,label=r'$\theta$ [$^\circ$]')
+plt.colorbar(cf,cax=cax,label=r'$\gamma$ [$^\circ$]')
 
 ax=fig.add_subplot(gs[2,0])
 ax.set_facecolor((0.9,0.9,0.9))

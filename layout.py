@@ -23,7 +23,7 @@ source_layout=os.path.join(cd,'data','20250225_AWAKEN_layout.nc')#layout
 farms_sel=['Armadillo Flats','King Plains','unknown Garfield County','Breckinridge']
 sites_trp=['B','C1a','G']
 sites_ws=['H']
-turb_sel=['E06']
+turb_sel=[]
 
 #%% Functions
 def three_point_star():

@@ -24,6 +24,9 @@ plt.close("all")
 source=os.path.join(cd,'data','awaken','kp.turbine.z02.00')
 source_layout=os.path.join(cd,'data','20250225_AWAKEN_layout.nc')
 turbines_sel=['A09','I02','G09']
+U_cutin=3#[m/s] cutin wind speed
+U_rated=10#[m/s] rated wind speed
+U_cutoff=25#[m/s] #cut-off wind speed
 wf='King Plains'
 vars_sel=['WindSpeed','ActivePower']
 source_layout=os.path.join(cd,'data','20250225_AWAKEN_layout.nc')
@@ -31,7 +34,7 @@ dt_ma=60#[s] moving average window
 
 #graphics
 colors={'A09':'g','I02':'b','G09':'r'}
-labels={'WindSpeed':r'$U$ [m s$^{-1}$]','ActivePower':r'$P_{norm}$'}
+labels={'WindSpeed':r'$U_h$ [m s$^{-1}$]','ActivePower':r'$P_{norm}$'}
 norm={'WindSpeed':1,'ActivePower':2800}
 
 #%% Functions
@@ -100,7 +103,7 @@ dt=np.float64(np.mean(np.diff(Data.time.values)))/10**9
 #%% Output
 t1=str(Data.time[0].values).replace('T','.').replace(':','').replace('-','')[:-10]
 t2=str(Data.time[-1].values).replace('T','.').replace(':','').replace('-','')[:-10]
-Data.to_netcdf(os.path.join(cd,'data','scada',t1+'.'+t2+'.scada.nc'))
+# Data.to_netcdf(os.path.join(cd,'data',t1+'.'+t2+'.scada.nc'))
 
 #%% Plots
 plt.close('all')
@@ -109,10 +112,16 @@ ctr=1
 plt.figure(figsize=(18,5))
 for v in vars_sel:
     ax=plt.subplot(len(vars_sel),1,ctr)
+    if ctr==1:
+        plt.plot([Data.time.values[0],Data.time.values[-1]],[U_cutin,U_cutin],'--k')
+        plt.plot([Data.time.values[0],Data.time.values[-1]],[U_rated,U_rated],'--k')
+        plt.plot([Data.time.values[0],Data.time.values[-1]],[U_cutoff,U_cutoff],'--k')
     for t in turbines_sel:
         plt.plot(Data.time,Data[v].sel(turbine=t)/norm[v],alpha=0.25,color=colors[t],linewidth=1)
         plt.plot(Data.time,Data[v].rolling(time=int(dt_ma/dt),center=True).mean().sel(turbine=t)/norm[v],color=colors[t])
     plt.gca().xaxis.set_major_formatter(mdates.DateFormatter('%H:%M'))
+    if ctr==1:
+        ax.set_xticklabels([])
     plt.grid()
     plt.ylabel(labels[v])
     plt.xlim([Data.time[0],Data.time[-1]])
@@ -120,22 +129,6 @@ for v in vars_sel:
 plt.xlabel('Time (UTC)')
 
 
-star_marker = MarkerStyle(three_point_star())
-plt.figure()
-turbines_wf=Turbines.name.where(Turbines.wind_plant==wf,drop=True).values
-for t in turbines_wf:
-    x_tur=Turbines.x_utm.where(Turbines.name==t,drop=True).values/1000
-    y_tur=Turbines.y_utm.where(Turbines.name==t,drop=True).values/1000
-    if t in turbines_sel and wf=='King Plains':
-        plt.plot(x_tur,y_tur,'xk', marker=star_marker, markersize=30, color=colors[t],zorder=10)
-    else:
-        plt.plot(x_tur,y_tur,'xk', marker=star_marker, markersize=10, color='k')
-        
-plt.xlabel('W-E [m]')
-plt.ylabel('S-N [m]')
-plt.xlim([625,650])
-plt.ylim([4022,4035])
-plt.gca().set_aspect('equal')
 
     
     

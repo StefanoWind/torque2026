@@ -13,6 +13,7 @@ import glob
 import matplotlib.gridspec as gridspec
 import warnings
 import utm
+import pandas as pd
 import pyart
 warnings.filterwarnings('ignore')
 matplotlib.rcParams['font.family'] = 'serif'
@@ -25,6 +26,8 @@ plt.close("all")
 source=os.path.join(cd,'data','20230805.100000.20230805.115959.scada.nc')
 source_rad=os.path.join(cd,'data','nexrad','*ar2v')
 source_layout=os.path.join(cd,'data','20250225_AWAKEN_layout.nc')
+source_offset=os.path.join(cd,'data','wd_offsets_Sept2025.csv')
+
 wf='King Plains'
 D=127#[m] rotor diameter
 t1=2000#initial timestep
@@ -34,7 +37,7 @@ power_rated=2800#[kW] rated power
 z_rad=100#[m] radar plane height a.g.l.
 time_shift_rad=120#[s] shift radar time
 
-make_video=False
+make_video=True
 
 #graphics
 sel_plot=[0,8,11,16]
@@ -73,7 +76,7 @@ def draw_turbine(x,y,D,wd,turbine_file,color=(255, 0, 0)):
 Data=xr.open_dataset(source)
 files_rad=glob.glob(source_rad)
 Turbines=xr.open_dataset(source_layout,group='turbines').rename({'Wind plant':'wind_plant'})
-
+Data_offset=pd.read_csv(source_offset)
 os.makedirs(os.path.join(cd,'figures','yaw'),exist_ok=True)
 
 #%% Plots
@@ -108,7 +111,7 @@ for f in np.array(files_rad)[sel_plot]:
     power_int=Data.ActivePower.interp(time=time_rad)
     c_int=np.cos(np.radians(Data.Nacelle_Position.interp(time=time_rad)))
     s_int=np.sin(np.radians(Data.Nacelle_Position.interp(time=time_rad)))
-    yaw_int=np.degrees(np.arctan2(s_int,c_int))
+    yaw_int=np.degrees(np.arctan2(s_int,c_int))+Data_offset['Northing Bias - 2022'].values
     
     #plot
     pc=plt.pcolor((grid.x['data']+xy[0])/1000,(grid.y['data']+xy[1])/1000,Z,cmap='Grays',vmin=-10,vmax=50)
@@ -118,7 +121,10 @@ for f in np.array(files_rad)[sel_plot]:
         y_tur=Turbines.y_utm.where(Turbines.name==tid,drop=True).values/1000
         yaw=yaw_int.sel(turbine=tid).values
         power=power_int.sel(turbine=tid).values
-        color=[int(c*255) for c in cmap(power/power_rated)[:-1]]
+        if power/power_rated>0.01:
+            color=[int(c*255) for c in cmap(power/power_rated)[:-1]]
+        else:
+            color=[250,0,0]
         draw_turbine(x_tur, y_tur, D/100, yaw, os.path.join(cd,'figures','Turbine.png'),color)
    
     plt.gca().set_aspect('equal')
@@ -173,7 +179,7 @@ if make_video:
         power_int=Data.ActivePower.interp(time=time_rad)
         c_int=np.cos(np.radians(Data.Nacelle_Position.interp(time=time_rad)))
         s_int=np.sin(np.radians(Data.Nacelle_Position.interp(time=time_rad)))
-        yaw_int=np.degrees(np.arctan2(s_int,c_int))
+        yaw_int=np.degrees(np.arctan2(s_int,c_int))+Data_offset['Northing Bias - 2022'].values
         
         #plot
         pc=plt.pcolor((grid.x['data']+xy[0])/1000,(grid.y['data']+xy[1])/1000,Z,cmap='Grays',vmin=-10,vmax=50)

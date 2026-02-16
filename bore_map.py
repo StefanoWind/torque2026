@@ -33,7 +33,7 @@ avg_time=10#[s] prebore period
 z_rad=100#[m a.g.l.] radar plane
 time_shift_rad=120#[s] shift radar time
 
-make_video=False
+make_video=True
 
 #graphics
 sel_plot=[0,8,16]
@@ -129,7 +129,7 @@ for f in np.array(files_rad)[sel_plot]:
     #plot
     pc=plt.pcolor((grid.x['data']+xy[0])/1000,(grid.y['data']+xy[1])/1000,Z,cmap='Spectral_r',vmin=-10,vmax=50)
     plt.plot(x_tur/1000,y_tur/1000,'.k',markersize=1)
-    sc=plt.scatter(x_msn/1000,y_msn/1000,s=30,c=dp_int,cmap='seismic',vmin=-0.5,vmax=0.5,edgecolor='k')
+    sc=plt.scatter(x_msn/1000,y_msn/1000,s=50,c=dp_int,cmap='seismic',vmin=-0.5,vmax=0.5,edgecolor='k',linewidth=2)
     
     ax=plt.gca()
     ax.set_aspect('equal')
@@ -187,7 +187,7 @@ if make_video:
         #plot
         pc=plt.pcolor((grid.x['data']+xy[0])/1000,(grid.y['data']+xy[1])/1000,Z,cmap='Spectral_r',vmin=-10,vmax=50)
         plt.plot(x_tur/1000,y_tur/1000,'.k',markersize=1)
-        sc=plt.scatter(x_msn/1000,y_msn/1000,s=30,c=dp_int,cmap='seismic',vmin=-0.5,vmax=0.5,edgecolor='k')
+        sc=plt.scatter(x_msn/1000,y_msn/1000,s=50,c=dp_int,cmap='seismic',vmin=-0.5,vmax=0.5,edgecolor='k',linewidth=2)
         
         ax=plt.gca()
         ax.set_aspect('equal')
@@ -199,8 +199,8 @@ if make_video:
         plt.grid()
         plt.title(str(time_rad).replace('T',' ')+' UTC')
         
-        plt.colorbar(pc,title=r'$Z$ [dBZ]',location='right')
-        plt.colorbar(sc,title=r'$\Delta p$ [%]',location='right')
+        plt.colorbar(pc,label=r'$Z$ [dBZ]',location='right')
+        plt.colorbar(sc,label=r'$\Delta p$ [%]',location='right')
         plt.tight_layout()
         plt.savefig(os.path.join(cd,'figures','mesonet',f'{ctr:02.0f}_mesonet.png'))
         plt.close()
