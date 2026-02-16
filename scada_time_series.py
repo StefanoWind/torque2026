@@ -10,7 +10,6 @@ import matplotlib
 from matplotlib import pyplot as plt
 import matplotlib.dates as mdates
 from matplotlib.path import Path
-from matplotlib.markers import MarkerStyle
 import warnings
 import pandas as pd
 warnings.filterwarnings('ignore')
@@ -29,13 +28,14 @@ U_rated=10#[m/s] rated wind speed
 U_cutoff=25#[m/s] #cut-off wind speed
 wf='King Plains'
 vars_sel=['WindSpeed','ActivePower']
+vars_sel2=['WindSpeed','ActivePower','Nacelle_Position']
 source_layout=os.path.join(cd,'data','20250225_AWAKEN_layout.nc')
 dt_ma=60#[s] moving average window
 
 #graphics
 colors={'A09':'g','I02':'b','G09':'r'}
-labels={'WindSpeed':r'$U_h$ [m s$^{-1}$]','ActivePower':r'$P_{norm}$'}
-norm={'WindSpeed':1,'ActivePower':2800}
+labels={'WindSpeed':r'$U_h$ [m s$^{-1}$]','ActivePower':r'$P_{norm}$','Nacelle_Position':'Yaw [$^\circ$]'}
+norm={'WindSpeed':1,'ActivePower':2800,'Nacelle_Position':1Da}
 
 #%% Functions
 def three_point_star():
@@ -122,6 +122,27 @@ for v in vars_sel:
     plt.gca().xaxis.set_major_formatter(mdates.DateFormatter('%H:%M'))
     if ctr==1:
         ax.set_xticklabels([])
+    plt.grid()
+    plt.ylabel(labels[v])
+    plt.xlim([Data.time[0],Data.time[-1]])
+    ctr+=1
+plt.xlabel('Time (UTC)')
+
+
+ctr=1
+plt.figure(figsize=(18,7))
+for v in vars_sel2:
+    ax=plt.subplot(len(vars_sel2),1,ctr)
+    if ctr==1:
+        plt.plot([Data.time.values[0],Data.time.values[-1]],[U_cutin,U_cutin],'--k')
+        plt.plot([Data.time.values[0],Data.time.values[-1]],[U_rated,U_rated],'--k')
+        plt.plot([Data.time.values[0],Data.time.values[-1]],[U_cutoff,U_cutoff],'--k')
+    for t in turbines_sel:
+        plt.plot(Data.time,Data[v].sel(turbine=t)/norm[v],alpha=0.25,color=colors[t],linewidth=1)
+        plt.plot(Data.time,Data[v].rolling(time=int(dt_ma/dt),center=True).mean().sel(turbine=t)/norm[v],color=colors[t])
+    # plt.gca().xaxis.set_major_formatter(mdates.DateFormatter('%H:%M'))
+    # if ctr<len(vars_sel2):
+        # ax.set_xticklabels([])
     plt.grid()
     plt.ylabel(labels[v])
     plt.xlim([Data.time[0],Data.time[-1]])
