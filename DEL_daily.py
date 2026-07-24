@@ -21,19 +21,20 @@ plt.close('all')
 
 #%% Inputs
 source=os.path.join(cd,'data/awaken/kp.turbine.z03.b0')
-loads_var=['tb_bend_resultant','b1_bend_root_resultant']
+loads_var=['tb_bend_resultant','b1_bend_root_resultant','active_power']
 turbine_id='e6'
 
 sdate='2023-08-01T00:00:00'#start date
 edate='2023-09-01T00:00:00'#end date
 dt=600#[s] time step
 
-m={'tb_bend_resultant':3,'b1_bend_root_resultant':10}#Mahler exponent
+m={'tb_bend_resultant':3,'b1_bend_root_resultant':10,'active_power':None}#Mahler exponent
 
 #graphics
 cmap = plt.cm.RdYlGn_r
 labels={'tb_bend_resultant':'DEL of tower-base bending moment [kNm]',
-        'b1_bend_root_resultant':'DEL of blade-root bending moment [kNm]'}
+        'b1_bend_root_resultant':'DEL of blade-root bending moment [kNm]',
+        'active_power':'Active power [kW]'}
 
 #%% Initialization
 dates=np.arange(np.datetime64(sdate),np.datetime64(edate)+np.timedelta64(1,'s'),np.timedelta64(1,'D'))
@@ -73,12 +74,16 @@ for d in dates:
                     Data_sel=Data.where((Data.time>t1)*(Data.time<t2),drop=True)#select time bin
                     
                     if len(Data_sel.time)>0:
-                        time=(Data_sel.time.values-Data_sel.time.values[0])/np.timedelta64(1,'s')#time in seconds
                         
-                        L=Data_sel[v].where(Data_sel[f'qc_{v}']==0).values#qc
-                        
-                        _del =np.append(_del, equivalent_load(time, L, m=m[v[3:]]))#calculcate del
-                        print(f'Calculated DEL at {str(t1).replace("T"," ")}')
+                        if m[v] is None:
+                            _del=np.append(_del, Data_sel[v].where(Data_sel[f'qc_{v}']==0).mean(dim='Time').values)
+                        else:
+                            time=(Data_sel.time.values-Data_sel.time.values[0])/np.timedelta64(1,'s')#time in seconds
+                            
+                            L=Data_sel[v].where(Data_sel[f'qc_{v}']==0).values#qc
+                            
+                            _del =np.append(_del, equivalent_load(time, L, m=m[v[3:]]))#calculcate del
+                            print(f'Calculated DEL at {str(t1).replace("T"," ")}')
                     else:
                         _del =np.append(_del, np.nan)
                 

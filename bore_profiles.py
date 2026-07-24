@@ -8,6 +8,7 @@ import numpy as np
 import xarray as xr
 import matplotlib
 from matplotlib import pyplot as plt
+import pandas as pd
 import matplotlib.gridspec as gridspec
 import matplotlib.dates as mdates
 import glob
@@ -22,8 +23,9 @@ plt.close("all")
 #%% Inputs
 source_trp=os.path.join(cd,'data','awaken','{site}.assist.z01.tropoe.c0','*nc')
 source_met=os.path.join(cd,'data','awaken','{site}.met.z01.b0','*nc')
-source_uvw=os.path.join('data','awaken','sh.lidar.z02.c0','*nc')
-source_str=os.path.join('data','awaken','sgpdlfptS6.b2','*nc')
+source_uvw=os.path.join(cd,'data','awaken','sh.lidar.z02.c0','*nc')
+source_str=os.path.join(cd,'data','awaken','sgpdlfptS6.b2','*nc')
+source_blh=os.path.join(cd,'data','pblh_siteG_20230805.100009_20230805.115953.csv')
 height_assist=1#[m] height of the ASSIST a.g.l.
 sites=['sc1','sb','sg']
 site_sel='sg'
@@ -33,6 +35,7 @@ avg_time=10#[min] prebore period
 dt=15#[s] timestep
 sdate='2023-08-05T10:00:00'#start time
 edate='2023-08-05T12:00:00'#end time
+met_height=2#[m] height of temperature measurements at AWAKEN
 
 #QC
 max_gamma=3 #maximumm gamma in TROPoe
@@ -42,6 +45,10 @@ limit_height=500#[m] max interpolation gap in height
 limit_time=120#[s]  max interpolation gap in time
 max_time_diff_trp=60#[s] max time interpolation gap for TROPoe data
 max_time_diff_uvw=20#[s] max time interpolation gap for lidar data
+
+#graphics
+colors={'sc1':'m','sb':'c','sg':'orange'}
+labels={'sc1':'Site C1a','sb':'Site B','sg':'Site G'}
 
 #%% Functions
 def time_interp(x,time,max_time_diff):
@@ -74,6 +81,7 @@ def interp_nan(x,limit_height,limit_time):
 time=np.arange(np.datetime64(sdate),np.datetime64(edate)+np.timedelta64(dt,'s')/2,np.timedelta64(dt,'s'))
 
 #zeroing
+T={}
 theta={}
 dtheta={}
 r={}
@@ -125,6 +133,7 @@ for s in sites:
     Data_trp=Data_trp.assign_coords(height=Data_trp.height*1000+height_assist)
     
     #interpolate thermodynamic quantities
+    T[s]=    interp_nan(time_interp(Data_trp.temperature,time, max_time_diff_trp),limit_height,limit_time)
     theta[s]=interp_nan(time_interp(Data_trp.theta,      time, max_time_diff_trp),limit_height,limit_time)
     r[s]=    interp_nan(time_interp(Data_trp.waterVapor, time, max_time_diff_trp),limit_height,limit_time)
     cbh[s]=             time_interp(Data_trp.cbh,        time, max_time_diff_trp)
@@ -144,6 +153,10 @@ for s in sites:
 for s in sites:
     theta_avg=theta[s].where(theta[s].time<=theta[s].time[0]+np.timedelta64(avg_time,'m')).mean(dim='time')
     dtheta[s]=theta[s]-theta_avg
+    
+#read PBLH
+Data_blh=pd.read_csv(source_blh).set_index('Time [UTC]')
+Data_blh.index = Data_blh.index.astype('datetime64[ns]')
 
 #%% Plots
 
@@ -200,7 +213,8 @@ ax=fig.add_subplot(gs[0,0])
 ax.set_facecolor((0.9,0.9,0.9))
 cf=plt.contourf(theta[s].time,theta[s].height,theta[s].T,np.arange(300,315+.1,.5),cmap='hot',extend='both')
 plt.contour(theta[s].time,theta[s].height,theta[s].T,np.arange(300,315+.1,.5),colors='k',linewidths=1,alpha=0.25,extend='both')
-plt.plot(cbh[s].time,cbh[s]*1000,'ow',markeredgecolor='k')
+plt.plot(cbh[s].time,cbh[s]*1000,'ob',markeredgecolor='k')
+plt.plot(Data_blh.index,Data_blh['BLH (Heffter) [km]']*1000,'ow',markeredgecolor='k')
 plt.gca().xaxis.set_major_formatter(mdates.DateFormatter('%H:%M'))
 plt.ylabel(r'$z$ [m]')
 plt.grid()
@@ -214,7 +228,8 @@ ax.set_facecolor((0.9,0.9,0.9))
 cf=plt.contourf(r[s].time,r[s].height,r[s].T,np.arange(7,17+.1,.5),cmap='GnBu',extend='both')
 plt.contour(r[s].time,r[s].height,r[s].T,np.arange(7,17+.1,.5),colors='k',linewidths=1,alpha=0.25,extend='both')
 plt.gca().xaxis.set_major_formatter(mdates.DateFormatter('%H:%M'))
-plt.plot(cbh[s].time,cbh[s]*1000,'ow',markeredgecolor='k')
+plt.plot(cbh[s].time,cbh[s]*1000,'ob',markeredgecolor='k')
+plt.plot(Data_blh.index,Data_blh['BLH (Heffter) [km]']*1000,'ow',markeredgecolor='k')
 plt.ylabel(r'$z$ [m]')
 plt.grid()
 plt.ylim([0,2000])
@@ -253,4 +268,22 @@ plt.xlabel('Time (UTC)')
 cax=fig.add_subplot(gs[:,1])
 plt.colorbar(cf,cax=cax,label=r'$\Delta \theta$ [K]')
 plt.tight_layout()
+
+
+#time history of T
+plt.figure(figsize=(18,6))
+for s in sites:
+    plt.plot(Data_met[s].time,Data_met[s].temperature,color=colors[s],linewidth=2,label=labels[s])
+    plt.plot(T[s].time,T[s].interp(height=met_height),'o',color=colors[s],markersize=5,markeredgecolor='k')
+
+plt.plot(Data_trp.time[0],100,'-k',linewidth=2,label='Met station')
+plt.plot(Data_trp.time[0],100,'ok',label='TROPoe')
+plt.xlim([Data_trp.time[0],Data_trp.time[-1]])
+plt.ylim([24,28])
+plt.ylabel(r'$T$ [$^\circ$C]')
+plt.xlabel('Time (UTC)')
+plt.legend()
+plt.grid()
+plt.gca().xaxis.set_major_formatter(mdates.DateFormatter('%H:%M'))
+
 
