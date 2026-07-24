@@ -13,4 +13,5 @@ __pycache__
 *.gif
 *.ar2v
 *.mdf
+*V06
 build/
