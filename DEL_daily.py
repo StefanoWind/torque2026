@@ -5,6 +5,7 @@ Test DEL calculation
 import os
 cd=os.getcwd()
 import numpy as np
+import sys
 from openfast_toolbox.tools.fatigue import equivalent_load
 from matplotlib import pyplot as plt
 import matplotlib.dates as mdates
@@ -20,10 +21,14 @@ warnings.filterwarnings('ignore')
 plt.close('all')
 
 #%% Inputs
-source=os.path.join(cd,'data/awaken/kp.turbine.z03.b0')
+if len(sys.argv)==1:
+    source=os.path.join(cd,'data/awaken/kp.turbine.z03.b0')
+    turbine_id='e6'
+else:
+    source=sys.argv[1]
+    turbine_id=sys.argv[2]
+    
 loads_var=['tb_bend_resultant','b1_bend_root_resultant','active_power']
-turbine_id='e6'
-
 sdate='2023-08-01T00:00:00'#start date
 edate='2023-09-01T00:00:00'#end date
 dt=600#[s] time step
