@@ -75,8 +75,8 @@ for d in dates:
                     
                     if len(Data_sel.time)>0:
                         
-                        if m[v] is None:
-                            _del=np.append(_del, Data_sel[v].where(Data_sel[f'qc_{v}']==0).mean(dim='Time').values)
+                        if m[v[3:]] is None:
+                            _del=np.append(_del, Data_sel[v].where(Data_sel[f'qc_{v}']==0).mean(dim='time').values)
                         else:
                             time=(Data_sel.time.values-Data_sel.time.values[0])/np.timedelta64(1,'s')#time in seconds
                             
