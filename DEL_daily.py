@@ -1,6 +1,14 @@
 # -*- coding: utf-8 -*-
 """
-Test DEL calculation
+Batch DEL calculation: computes damage equivalent loads in 10-min bins, run per day over a date range.
+
+Inputs (both hard-coded and available as command line inputs in this order):
+    source: path to the b0 turbine-loads folder
+    turbine_id: two-char turbine code
+    sdate [%Y-%m-%dT%H:%M:%S]: start date in UTC
+    edate [%Y-%m-%dT%H:%M:%S]: end date in UTC
+    replace [bool]: whether to overwrite existing daily outputs
+    mode [str]: serial or parallel
 """
 import os
 cd=os.getcwd()
@@ -13,8 +21,9 @@ import glob
 import xarray as xr
 import warnings
 import matplotlib
+from multiprocessing import Pool
 matplotlib.rcParams['font.family'] = 'serif'
-matplotlib.rcParams['mathtext.fontset'] = 'cm' 
+matplotlib.rcParams['mathtext.fontset'] = 'cm'
 matplotlib.rcParams['font.size'] = 14
 
 warnings.filterwarnings('ignore')
@@ -27,13 +36,15 @@ if len(sys.argv)==1:
     sdate='2023-08-01T00:00:00'#start date
     edate='2023-09-01T00:00:00'#end date
     replace=False
+    mode='serial'#serial or parallel
 else:
     source=sys.argv[1]
     turbine_id=sys.argv[2]
     sdate=sys.argv[3]
     edate=sys.argv[4]
     replace=sys.argv[5]=='True'
-    
+    mode=sys.argv[6]#serial or parallel
+
 loads_var=['tb_bend_resultant','b1_bend_root_resultant','active_power']
 
 dt=600#[s] time step
@@ -46,16 +57,12 @@ labels={'tb_bend_resultant':'DEL of tower-base bending moment [kNm]',
         'b1_bend_root_resultant':'DEL of blade-root bending moment [kNm]',
         'active_power':'Active power [kW]'}
 
-#%% Initialization
-dates=np.arange(np.datetime64(sdate),np.datetime64(edate)+np.timedelta64(1,'s'),np.timedelta64(1,'D'))
-os.makedirs(os.path.join(source.replace('b0','del')),exist_ok=True)
-
 loads_var_tur=[f'{turbine_id}_{v}' for v in loads_var]
 qc_var_tur=[f'qc_{v}' for v in loads_var_tur]
 
-#%% Main
-for d in dates:
-    
+#%% Functions
+def process_day(d,source,turbine_id,loads_var,loads_var_tur,qc_var_tur,dt,m,labels,replace):
+
     #time bins
     bins_time=np.arange(d,
                         d+np.timedelta64(1,'D')+np.timedelta64(1,'s'),
@@ -85,7 +92,7 @@ for d in dates:
                     if v in Data.data_vars:
                         _del=[]
                         for t1,t2 in zip(bins_time[:-1],bins_time[1:]):
-                            Data_sel=Data.where((Data.time>t1)*(Data.time<t2),drop=True)#select time bin
+                            Data_sel=Data.where((Data.time>=t1)*(Data.time<t2),drop=True)#select time bin (half-open, avoids dropping samples on bin edges)
                             
                             if len(Data_sel.time)>0:
                                 
@@ -116,7 +123,7 @@ for d in dates:
                 plt.savefig(os.path.join(source.replace('b0','del'),os.path.basename(source).replace('b0','del')+'.'+d_str+'.png'))
                 plt.close()
                 
-                DEL.to_netcdf()
+                DEL.to_netcdf(save_name)
             except Exception as e:
                 print(f'Error on day {str(d)}')
                 print(e)
@@ -124,4 +131,18 @@ for d in dates:
             print(f'No files on {d_str}')
     else:
         print(f'{os.path.basename(save_name)} already exists')
-                    
+
+#%% Main
+if __name__=='__main__':
+    dates=np.arange(np.datetime64(sdate),np.datetime64(edate)+np.timedelta64(1,'s'),np.timedelta64(1,'D'))
+    os.makedirs(os.path.join(source.replace('b0','del')),exist_ok=True)
+
+    if mode=='serial':
+        for d in dates:
+            process_day(d,source,turbine_id,loads_var,loads_var_tur,qc_var_tur,dt,m,labels,replace)
+    elif mode=='parallel':
+        args=[(d,source,turbine_id,loads_var,loads_var_tur,qc_var_tur,dt,m,labels,replace) for d in dates]
+        with Pool() as pool:
+            pool.starmap(process_day,args)
+    else:
+        raise ValueError(f"{mode} is not a valid processing mode (must be serial or parallel)")
