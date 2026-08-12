@@ -71,7 +71,7 @@ highlight=(Loads.time.values>=highlight_period[0])&(Loads.time.values<=highlight
 plt.figure(figsize=(14,5))
 for i,v in enumerate(loads_var):
     var=f'{turbine_id}_{v}'
-    load=Loads[var]/np.nanpercentile(Loads[var],99)
+    load=Loads[var]/np.nanmax(Loads[var])
 
     load_avg=binned_avg_1d(ws_aligned,load,ws_bins,max_ci_frac)
     valid=~np.isnan(load_avg)#bins meeting the statistical uncertainty requirement
@@ -83,7 +83,7 @@ for i,v in enumerate(loads_var):
     p10[~valid]=np.nan; p90[~valid]=np.nan; p5[~valid]=np.nan; p95[~valid]=np.nan
 
     ax=plt.subplot(1,len(loads_var),i+1)
-    plt.plot(ws_aligned,load,'.k',alpha=0.25,markersize=10,label='Data')
+    # plt.plot(ws_aligned,load,'.k',alpha=0.25,markersize=10,label='Data')
     ws_highlight=ws_aligned[highlight]
     load_highlight=load.values[highlight]
     times_highlight=pd.to_datetime(Loads.time.values[highlight])
