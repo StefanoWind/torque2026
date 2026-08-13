@@ -49,7 +49,7 @@ loads_var=['tb_bend_resultant','b1_bend_root_resultant','active_power']
 
 dt=600#[s] time step
 
-m={'tb_bend_resultant':3,'b1_bend_root_resultant':10,'active_power':None}#Mahler exponent
+m={'tb_bend_resultant':3,'b1_bend_root_resultant':10}#Mahler exponent
 
 #graphics
 cmap = plt.cm.RdYlGn_r
