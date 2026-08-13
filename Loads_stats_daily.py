@@ -157,7 +157,7 @@ def process_day(d,source,turbine_id,loads_var,loads_var_tur,dt,labels,replace):
 #%% Main
 if __name__=='__main__':
     dates=np.arange(np.datetime64(sdate),np.datetime64(edate)+np.timedelta64(1,'s'),np.timedelta64(1,'D'))
-    os.makedirs(os.path.join(source.replace('b0','stats')),exist_ok=True)
+    os.makedirs(os.path.join(source.replace('b0','c1')),exist_ok=True)
 
     if mode=='serial':
         for d in dates:
