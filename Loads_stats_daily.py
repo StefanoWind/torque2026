@@ -35,7 +35,7 @@ if len(sys.argv)==1:
     turbine_id='e6'
     sdate='2023-08-05T00:00:00'#start date
     edate='2023-08-06T00:00:00'#end date
-    replace=False
+    replace=True
     mode='serial'#serial or parallel
 else:
     source=sys.argv[1]
@@ -45,13 +45,19 @@ else:
     replace=sys.argv[5]=='True'
     mode=sys.argv[6]#serial or parallel
 
-loads_var=['tb_bend_resultant','b1_bend_root_resultant']
-wholer_exp={'tb_bend_resultant':3,'b1_bend_root_resultant':10}#Mahler exponent
+loads_var=['tb_bend_foreaft','tb_bend_sideside','tb_bend_resultant','b1_bend_flap_root','b1_bend_edge_root','b1_bend_root_resultant']
+
+wholer_exp={'tb_bend_foreaft':4,   'tb_bend_sideside':4,  'tb_bend_resultant':4,
+            'b1_bend_flap_root':10,'b1_bend_edge_root':10,'b1_bend_root_resultant':10}#Wohler exponent
 dt=600#[s] time step
 
 #graphics
-labels={'tb_bend_resultant':'Tower-base \n bending moment [kNm]',
-        'b1_bend_root_resultant':'Blade-root \n bending moment [kNm]'}
+labels={'tb_bend_foreaft':r'$M_{tb,fa}$ [kNm]',
+        'tb_bend_sideside':r'$M_{tb,ss}$ [kNm]',
+        'tb_bend_resultant':r'$M_{tb,res}$ [kNm]',
+        'b1_bend_root_resultant':r'$M_{br,res}$ [kNm]',
+        'b1_bend_flap_root':r'$M_{br,fl}$ [kNm]',
+        'b1_bend_edge_root':r'$M_{br,ed}$ [kNm]'}
 
 loads_var_tur=[f'{turbine_id}_{v}' for v in loads_var]
 
@@ -121,7 +127,7 @@ def process_day(d,source,turbine_id,loads_var,loads_var_tur,dt,labels,replace):
                         Stats[v+'_max']=xr.DataArray(_max,coords={'time':time_avg})
                         Stats[v+'_del']=xr.DataArray(_del,coords={'time':time_avg})
 
-                plt.figure(figsize=(20,10))
+                plt.figure(figsize=(18,10))
                 ctr=1
                 for v in loads_var_tur:
                     if v in Data.data_vars:
@@ -140,6 +146,7 @@ def process_day(d,source,turbine_id,loads_var,loads_var_tur,dt,labels,replace):
 
                 #output
                 plt.xlabel('Time (UTC)')
+                plt.tight_layout()
                 plt.savefig(os.path.join(source.replace('b0','c1'),os.path.basename(source).replace('b0','c1')+'.'+d_str+'.png'))
                 plt.close()
 
