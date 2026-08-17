@@ -84,6 +84,7 @@ def process_day(d,source,turbine_id,loads_var,loads_var_tur,dt,labels,replace):
             #read all loads
             try:
                 Data=xr.open_mfdataset(files[turbine_ids==turbine_id])
+                Data_raw=xr.Dataset()
                 Data_qc=xr.Dataset()
 
                 for v in loads_var_tur:
@@ -97,12 +98,13 @@ def process_day(d,source,turbine_id,loads_var,loads_var_tur,dt,labels,replace):
                         _max_qc=[]
                         _del_qc=[]
 
+                        Data_raw[v]=Data[v].compute()
                         Data_qc[v]=Data[v].where(Data['qc_'+v]==0).compute()
 
                         for t1,t2 in zip(bins_time[:-1],bins_time[1:]):
 
                             #raw data
-                            Data_sel=Data.where((Data.time>=t1)*(Data.time<t2),drop=True)#select time bin (half-open, avoids dropping samples on bin edges)
+                            Data_sel=Data_raw.where((Data_raw.time>=t1)*(Data_raw.time<t2),drop=True)#select time bin (half-open, avoids dropping samples on bin edges)
                             
                             if len(Data_sel.time)>0:
 
