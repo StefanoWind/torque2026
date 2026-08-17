@@ -9,6 +9,7 @@ import pandas as pd
 import xarray as xr
 import glob
 import warnings
+from tqdm import tqdm
 from matplotlib import pyplot as plt
 from matplotlib.patches import FancyArrowPatch
 import matplotlib
@@ -24,13 +25,16 @@ source_loads=os.path.join(cd,'data/awaken/kp.turbine.z03.c1/*nc')
 source_scada=os.path.join(cd,'data/awaken/kp.turbine.z02.c0')
 turbine_id='e6'
 turbine_id_scada='wt041'#SCADA turbine id corresponding to turbine_id (Alias E06)
-loads_var=['tb_bend_resultant','b1_bend_root_resultant']
+loads_var=['tb_bend_resultant_del','b1_bend_root_resultant_del',
+           'tb_bend_resultant_max','b1_bend_root_resultant_max']
 ws_var='WMET.HorWdSpd_10m_Avg'
+ti_var='WMET.HorWdSpd_10m_Std'
 ws_flag_var='WS_Flag_10m_Percent'
 pow_var='WTUR.W_10m_Avg'
 pow_flag_var='PWR_Flag_10m_Percent'
 min_power=2800*0.05
 min_data_avail=0.5
+ti_bins=[2,13,60]
 
 ws_bin_width=1#[m/s] wind speed bin width
 load_bin_width=0.05#[-] normalized load bin width for the 2D occurrence histogram
@@ -38,29 +42,40 @@ max_ci_frac=0.1#max width of the bootstrap CI, as a fraction of the load's std
 
 highlight_period=[np.datetime64('2023-08-05T10:00:00'),np.datetime64('2023-08-05T12:00:00')]#datetimes highlighted in the scatter
 
-labels={'tb_bend_resultant':'DEL of tower-base bending moment [kNm]',
-        'b1_bend_root_resultant':'DEL of blade-root bending moment [kNm]'}
+labels={'tb_bend_foreaft_del':r'DEL($M_{tb,fa}$) [kNm]',
+        'tb_bend_sideside_del':r'DEL($M_{tb,ss}$) [kNm]',
+        'tb_bend_resultant_del':r'DEL($M_{tb,res}$) [kNm]',
+        'b1_bend_root_resultant_del':r'DEL($M_{br,res}$) [kNm]',
+        'b1_bend_flap_root_del':r'DEL($M_{br,fl}$) [kNm]',
+        'b1_bend_edge_root_del':r'DEL($M_{br,ed}$) [kNm]',
+        'tb_bend_foreaft_max':r'MAX($M_{tb,fa}$) [kNm]',
+        'tb_bend_sideside_max':r'MAX($M_{tb,ss}$) [kNm]',
+        'tb_bend_resultant_max':r'MAX($M_{tb,res}$) [kNm]',
+        'b1_bend_root_resultant_max':r'MAX($M_{br,res}$) [kNm]',
+        'b1_bend_flap_root_max':r'MAX($M_{br,fl}$) [kNm]',
+        'b1_bend_edge_root_max':r'MAX($M_{br,ed}$) [kNm]'}
 
 #%% Load data
 files=sorted(glob.glob(source_loads))
-Loads=xr.open_mfdataset(files).compute()
+Loads=xr.concat([xr.open_dataset(f).load() for f in tqdm(files,desc='Loading loads files')],dim='time')
 
-#restrict SCADA files to the days covered by the loads dataset
-dates=pd.date_range(pd.Timestamp(Loads.time.values.min()).floor('D'),
-                     pd.Timestamp(Loads.time.values.max()).floor('D'))
+#restrict SCADA files to the days actually present in the loads dataset
+dates=pd.DatetimeIndex(np.unique(Loads.time.dt.floor('D').values))
 files_scada=[]
 for d in dates:
     files_scada+=glob.glob(os.path.join(source_scada,f'*{d.strftime("%Y%m%d")}*{turbine_id_scada}*nc'))
-Scada=xr.open_mfdataset(sorted(files_scada)).compute()
+scada_vars=[ws_var,ti_var,pow_var,pow_flag_var]
+Scada=xr.concat([xr.open_dataset(f)[scada_vars].load() for f in tqdm(sorted(files_scada),desc='Loading SCADA files')],dim='WTUR.DateTime')
 Scada=Scada.rename({'WTUR.DateTime':'time'})
 Scada['time']=Scada.time+pd.Timedelta(minutes=5)#SCADA timestamps mark bin start, loads use bin centers
 
-
 power=Scada[pow_var].where(Scada[pow_flag_var]>=min_data_avail)#kept available for future use
 ws=Scada[ws_var].where(power>min_power)
+ti=Scada[ti_var]/Scada[ws_var].where(power>min_power)*100
 
 #align wind speed onto the load time grid
 ws_aligned=ws.reindex(time=Loads.time.values).values
+ti_aligned=ti.reindex(time=Loads.time.values).values
 
 ws_bins=np.arange(0,np.nanmax(ws_aligned)+ws_bin_width,ws_bin_width)
 ws_avg=(ws_bins[1:]+ws_bins[:-1])/2
@@ -68,44 +83,51 @@ ws_avg=(ws_bins[1:]+ws_bins[:-1])/2
 highlight=(Loads.time.values>=highlight_period[0])&(Loads.time.values<=highlight_period[1])
 
 #%% Main
-plt.figure(figsize=(14,5))
-for i,v in enumerate(loads_var):
-    var=f'{turbine_id}_{v}'
-    load=Loads[var]/np.nanmax(Loads[var][highlight])
-
-    ax=plt.subplot(1,len(loads_var),i+1)
-
-    #2D histogram of ws vs. normalized load occurrence, contoured in log10 probability to highlight rare regions
-    load_bins=np.arange(0,np.nanmax(load.values)+load_bin_width,load_bin_width)
-    valid_hist=np.isfinite(ws_aligned)&np.isfinite(load.values)
-    H,xedges,yedges=np.histogram2d(ws_aligned[valid_hist],load.values[valid_hist],bins=[ws_bins,load_bins])
-    logP=np.ma.masked_invalid(np.log10(H.T/H.sum()))#log10 probability of occurrence, zero-count bins masked
-    xc=(xedges[:-1]+xedges[1:])/2
-    yc=(yedges[:-1]+yedges[1:])/2
-    cf=ax.contourf(xc,yc,logP,levels=20,cmap='Greys')
-    plt.colorbar(cf,ax=ax,label='log$_{10}$(Probability of occurrence)',pad=0.02)
-    
-    #highlight period plotted on top as an oriented (arrow-connected) trajectory
-    ws_highlight=ws_aligned[highlight]
-    load_highlight=load.values[highlight]
-    times_highlight=pd.to_datetime(Loads.time.values[highlight])
-    for j in range(len(ws_highlight)-1):
-        if ~np.isnan(ws_highlight[j]+load_highlight[j]+ws_highlight[j+1]+load_highlight[j+1]):
-            arrow=FancyArrowPatch((ws_highlight[j],load_highlight[j]),(ws_highlight[j+1],load_highlight[j+1]),
-                                   arrowstyle='->',color='r',mutation_scale=15,zorder=10)
-            ax.add_patch(arrow)
-    plt.scatter(ws_highlight,load_highlight,s=30,color='r',zorder=11,label='Selected period')
-    # for x,y,t in zip(ws_highlight,load_highlight,times_highlight):
-    #     ax.annotate(t.strftime('%H%M'),(x,y),xytext=(0,5),textcoords='offset points',
-    #                 color='r',ha='center',va='bottom',fontsize=9,zorder=11)
-    plt.xlabel('$U_h$ [m s$^{-1}$]')
-    plt.ylabel(labels[v])
-    plt.grid()
-    if i==0:
-        plt.legend()
-
-plt.tight_layout()
-
 os.makedirs(os.path.join(cd,'figures/DEL_stats'),exist_ok=True)
-plt.savefig(os.path.join(cd,'figures/DEL_stats',f'{turbine_id}.DEL_stats.png'))
+for k in range(len(ti_bins)-1):
+    ti_mask=(ti_aligned>=ti_bins[k])&(ti_aligned<ti_bins[k+1])
+
+    fig=plt.figure(figsize=(14,10))
+    axs=[]
+    for i,v in enumerate(loads_var):
+        var=f'{turbine_id}_{v}'
+        load=Loads[var]/np.nanmax(Loads[var][highlight])
+
+        ax=plt.subplot(2,2,i+1)
+        axs.append(ax)
+
+        #2D histogram of ws vs. normalized load occurrence, contoured in log10 probability to highlight rare regions
+        load_bins=np.arange(0,np.nanmax(load.values)+load_bin_width,load_bin_width)
+        valid_hist=np.isfinite(ws_aligned)&np.isfinite(load.values)&ti_mask
+        H,xedges,yedges=np.histogram2d(ws_aligned[valid_hist],load.values[valid_hist],bins=[ws_bins,load_bins])
+        logP=np.ma.masked_invalid(np.log10(H.T/H.sum()))#log10 probability of occurrence, zero-count bins masked
+        xc=(xedges[:-1]+xedges[1:])/2
+        yc=(yedges[:-1]+yedges[1:])/2
+        cf=ax.pcolor(xc,yc,logP,cmap='Greys',vmin=-4,vmax=-1)
+
+        #highlight period plotted on top as an oriented (arrow-connected) trajectory
+        highlight_ti=highlight&ti_mask
+        ws_highlight=ws_aligned[highlight_ti]
+        load_highlight=load.values[highlight_ti]
+        times_highlight=pd.to_datetime(Loads.time.values[highlight_ti])
+        for j in range(len(ws_highlight)-1):
+            if ~np.isnan(ws_highlight[j]+load_highlight[j]+ws_highlight[j+1]+load_highlight[j+1]):
+                arrow=FancyArrowPatch((ws_highlight[j],load_highlight[j]),(ws_highlight[j+1],load_highlight[j+1]),
+                                       arrowstyle='->',color='r',mutation_scale=15,zorder=10)
+                ax.add_patch(arrow)
+        plt.scatter(ws_highlight,load_highlight,s=30,color='r',zorder=11,label='Selected period')
+        # for x,y,t in zip(ws_highlight,load_highlight,times_highlight):
+        #     ax.annotate(t.strftime('%H%M'),(x,y),xytext=(0,5),textcoords='offset points',
+        #                 color='r',ha='center',va='bottom',fontsize=9,zorder=11)
+        plt.ylim([0,1.2])
+        plt.xlabel('$U_h$ [m s$^{-1}$]')
+        plt.ylabel(labels[v])
+        plt.grid()
+        if i==0:
+            plt.legend()
+        if i==1:
+            plt.title(f'TI $\\in$ [{ti_bins[k]},{ti_bins[k+1]}) %')
+
+    fig.colorbar(cf,ax=axs,label='log$_{10}$(Probability of occurrence)',pad=0.02)
+    # plt.savefig(os.path.join(cd,'figures/DEL_stats',f'{turbine_id}.DEL_stats.TI_{ti_bins[k]}_{ti_bins[k+1]}.png'))
 
