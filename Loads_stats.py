@@ -20,7 +20,7 @@ warnings.filterwarnings('ignore')
 plt.close('all')
 
 #%% Inputs
-source_loads=os.path.join(cd,'data/awaken/kp.turbine.z03.del/*nc')
+source_loads=os.path.join(cd,'data/awaken/kp.turbine.z03.c1/*nc')
 source_scada=os.path.join(cd,'data/awaken/kp.turbine.z02.c0')
 turbine_id='e6'
 turbine_id_scada='wt041'#SCADA turbine id corresponding to turbine_id (Alias E06)

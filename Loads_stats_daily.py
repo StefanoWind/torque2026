@@ -33,8 +33,8 @@ plt.close('all')
 if len(sys.argv)==1:
     source=os.path.join(cd,'data/awaken/kp.turbine.z03.b0')
     turbine_id='e6'
-    sdate='2023-08-05T00:00:00'#start date
-    edate='2023-08-06T00:00:00'#end date
+    sdate='2023-10-18T00:00:00'#start date
+    edate='2023-10-18T00:00:00'#end date
     replace=True
     mode='serial'#serial or parallel
 else:
@@ -92,11 +92,18 @@ def process_day(d,source,turbine_id,loads_var,loads_var_tur,dt,labels,replace):
                         _avg=[]
                         _max=[]
                         _del=[]
-                        
-                        Data_qc[v]=Data[v].where(Data['qc_'+v]==0).compute()
-                        for t1,t2 in zip(bins_time[:-1],bins_time[1:]):
-                            Data_sel=Data_qc.where((Data_qc.time>=t1)*(Data_qc.time<t2),drop=True)#select time bin (half-open, avoids dropping samples on bin edges)
+                        _num_qc=[]
+                        _avg_qc=[]
+                        _max_qc=[]
+                        _del_qc=[]
 
+                        Data_qc[v]=Data[v].where(Data['qc_'+v]==0).compute()
+
+                        for t1,t2 in zip(bins_time[:-1],bins_time[1:]):
+
+                            #raw data
+                            Data_sel=Data.where((Data.time>=t1)*(Data.time<t2),drop=True)#select time bin (half-open, avoids dropping samples on bin edges)
+                            
                             if len(Data_sel.time)>0:
 
                                 L=Data_sel[v].values
@@ -113,19 +120,49 @@ def process_day(d,source,turbine_id,loads_var,loads_var_tur,dt,labels,replace):
                                 #DEL
                                 time=(Data_sel.time.values-Data_sel.time.values[0])/np.timedelta64(1,'s')#time in seconds
                                 _del =np.append(_del, equivalent_load(time, L, m=wholer_exp[v[3:]]))#calculcate del
-
-                                print(f'Calculated stats of {v} at {str(t1).replace("T"," ")}',flush=True)
                             else:
                                 _del =np.append(_del, np.nan)
                                 _avg =np.append(_avg, np.nan)
                                 _max =np.append(_max, np.nan)
                                 _num=np.append(_num,0)
+                            
+                            #QC data
+                            Data_qc_sel=Data_qc.where((Data_qc.time>=t1)*(Data_qc.time<t2),drop=True)#select time bin (half-open, avoids dropping samples on bin edges)
+                           
+                            if len(Data_qc_sel.time)>0:
+
+                                L=Data_qc_sel[v].values
+
+                                #count
+                                _num_qc=np.append(_num_qc,np.sum(~np.isnan(L)))
+
+                                #avg
+                                _avg_qc=np.append(_avg_qc,np.nanmean(L))
+
+                                #max
+                                _max_qc=np.append(_max_qc,np.nanmax(L))
+
+                                #DEL
+                                time=(Data_qc_sel.time.values-Data_qc_sel.time.values[0])/np.timedelta64(1,'s')#time in seconds
+                                _del_qc =np.append(_del_qc, equivalent_load(time, L, m=wholer_exp[v[3:]]))#calculcate del
+
+                                print(f'Calculated stats of {v} at {str(t1).replace("T"," ")}',flush=True)
+                            else:
+                                _del_qc =np.append(_del_qc, np.nan)
+                                _avg_qc =np.append(_avg_qc, np.nan)
+                                _max_qc =np.append(_max_qc, np.nan)
+                                _num_qc=np.append(_num_qc,0)
 
                         #store data
                         Stats[v+'_num']=xr.DataArray(_num,coords={'time':time_avg})
                         Stats[v+'_avg']=xr.DataArray(_avg,coords={'time':time_avg})
                         Stats[v+'_max']=xr.DataArray(_max,coords={'time':time_avg})
                         Stats[v+'_del']=xr.DataArray(_del,coords={'time':time_avg})
+                        Stats[v+'_num_qc']=xr.DataArray(_num_qc,coords={'time':time_avg})
+                        Stats[v+'_avg_qc']=xr.DataArray(_avg_qc,coords={'time':time_avg})
+                        Stats[v+'_max_qc']=xr.DataArray(_max_qc,coords={'time':time_avg})
+                        Stats[v+'_del_qc']=xr.DataArray(_del_qc,coords={'time':time_avg})
+
 
                 plt.figure(figsize=(18,10))
                 ctr=1
@@ -133,9 +170,12 @@ def process_day(d,source,turbine_id,loads_var,loads_var_tur,dt,labels,replace):
                     if v in Data.data_vars:
                         ax=plt.subplot(len(loads_var),1,ctr)
                         
-                        plt.plot(Stats.time,Stats[f'{v}_avg'],'.-k',label='Avg')
-                        plt.plot(Stats.time,Stats[f'{v}_max'],'.-r',label='Max')
-                        plt.plot(Stats.time,Stats[f'{v}_del'],'.-b',label='DEL')
+                        plt.plot(Stats.time,Stats[f'{v}_avg'],'.-k',alpha=0.5)
+                        plt.plot(Stats.time,Stats[f'{v}_max'],'.-r',alpha=0.5)
+                        plt.plot(Stats.time,Stats[f'{v}_del'],'.-b',alpha=0.5)
+                        plt.plot(Stats.time,Stats[f'{v}_avg_qc'],'.-k',label='Avg')
+                        plt.plot(Stats.time,Stats[f'{v}_max_qc'],'.-r',label='Max')
+                        plt.plot(Stats.time,Stats[f'{v}_del_qc'],'.-b',label='DEL')
                         ax.set_xticklabels([])
                         plt.ylabel(labels[v[3:]])
                         plt.gca().xaxis.set_major_formatter(mdates.DateFormatter('%H:%M'))
