@@ -35,7 +35,7 @@ dt_ma=60#[s] moving average window
 #graphics
 colors={'A09':'g','I02':'b','G09':'r'}
 labels={'WindSpeed':r'$U_h$ [m s$^{-1}$]','ActivePower':r'$P_{norm}$','Nacelle_Position':'Yaw [$^\circ$]'}
-norm={'WindSpeed':1,'ActivePower':2800,'Nacelle_Position':1Da}
+norm={'WindSpeed':1,'ActivePower':2800,'Nacelle_Position':1}
 
 #%% Functions
 def three_point_star():
