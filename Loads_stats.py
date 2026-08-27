@@ -34,8 +34,10 @@ pow_var='WTUR.W_10m_Avg'
 pow_flag_var='PWR_Flag_10m_Percent'
 min_data_avail=0.25
 min_ti=1
-ws_bins=np.arange(0,21,2)
-ti_bins=np.arange(0,65,10)
+dws=2
+dti=10
+ws_bins=np.arange(0,21,dws)
+ti_bins=np.arange(0,65,dti)
 load_bins=np.arange(0,1.31,0.1)
 
 max_ci_frac=0.1#max width of the bootstrap CI, as a fraction of the load's std
@@ -119,23 +121,31 @@ logP2=np.ma.masked_invalid(np.log10(pdf_2d).T)#zero-density bins masked
 
 prob={}
 prob_cond={}
+prob2={}
+prob_cond2={}
 n_highlight=len(np.where(highlight)[0])
 for v in loads_var:
     var=f'{turbine_id}_{v}'
     prob[v]=     np.zeros(n_highlight)
     prob_cond[v]=np.zeros(n_highlight)
+    prob2[v]=     np.zeros(n_highlight)
+    prob_cond2[v]=np.zeros(n_highlight)
     for i,it in enumerate(np.where(highlight)[0]):
         ws_sel=ws_aligned[it]
         ti_sel=ti_aligned[it]
-        L_sel=np.float64(Loads[var].isel(time=it)/np.nanmax(Loads[var][highlight]))
-        greater=load_avg>L_sel
-        
-        prob[v][i]=np.sum(pdf_3d[v][:,:,greater])
-        
+        L=Loads[var]/np.nanmax(Loads[var][highlight])
+        L_sel=np.float64(L.isel(time=it))        
         i_ws=np.argmin(np.abs(ws_sel-ws_avg))
         i_ti=np.argmin(np.abs(ti_sel-ti_avg))
-        prob_cond[v][i]=np.sum(pdf_3d[v][i_ti,i_ws,greater]/(10**-10+pdf_2d[i_ti,i_ws]))
-    
+        sel_ws=(ws_aligned>ws_sel-dws/2)*(ws_aligned<=ws_sel+dws/2)
+        
+        prob[v][i]=np.sum(pdf_3d[v][:,:,load_avg>=L_sel])
+        prob_cond[v][i]=np.sum(pdf_3d[v][i_ti,i_ws,load_avg>=L_sel]/(10**-10+pdf_2d[i_ti,i_ws]))
+        
+        
+        sel_ti=(ti_aligned>ti_sel-dti/2)*(ti_aligned<=ti_sel+dti/2)
+        prob2[v][i]=np.sum(L>=L_sel)/np.sum(np.isfinite(L))
+        prob_cond2[v][i]=np.sum(L[sel_ws*sel_ti]>=L_sel)/np.sum(np.isfinite(L[sel_ws*sel_ti]))
     
 #%% Main (filled-slice style, colored by pdf)
 plt.close('all')
