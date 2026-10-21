@@ -23,12 +23,15 @@ matplotlib.rcParams['savefig.dpi']=500
 plt.close("all")
 
 #%%Inputs
-source=os.path.join(cd,'data','20230805.100000.20230805.115959.scada.nc')
+source=os.path.join(cd,'data','awaken','kp.turbine.z02.b0','*20230805*nc')
 source_rad=os.path.join(cd,'data','nexrad','*ar2v')
 source_layout=os.path.join(cd,'data','20250225_AWAKEN_layout.nc')
 source_offset=os.path.join(cd,'data','wd_offsets_Sept2025.csv')
 
 wf='King Plains'
+t_start='2023-08-05T10:00:00'
+t_end='2023-08-05T11:59:59'
+limit_time=10#[s] max gap filled by interpolation
 D=127#[m] rotor diameter
 t1=2000#initial timestep
 t2=4000#final timestep
@@ -37,7 +40,7 @@ power_rated=2800#[kW] rated power
 z_rad=100#[m] radar plane height a.g.l.
 time_shift_rad=120#[s] shift radar time
 
-make_video=True
+make_video=False
 
 #graphics
 sel_plot=[0,8,11,16]
@@ -73,11 +76,29 @@ def draw_turbine(x,y,D,wd,turbine_file,color=(255, 0, 0)):
     plt.ylim(ylim)
     
 #%% Initialization
-Data=xr.open_dataset(source)
 files_rad=glob.glob(source_rad)
 Turbines=xr.open_dataset(source_layout,group='turbines').rename({'Wind plant':'wind_plant'})
-Data_offset=pd.read_csv(source_offset)
+Data_offset=pd.read_csv(source_offset).set_index('Turbine Serial Number')['Northing Bias - 2022']
 os.makedirs(os.path.join(cd,'figures','yaw'),exist_ok=True)
+
+#read scada
+scada_all=[]
+for file in sorted(glob.glob(source)):
+    scada_ds=xr.open_dataset(file).rename({'WTUR.DateTime':'time'})
+    turbine=scada_ds.attrs['Alias']
+    serial=int(scada_ds['WTUR.Id'][0])
+    scada_ds=scada_ds.sel(time=slice(t_start,t_end))
+
+    #yaw as unit vector to avoid averaging/interpolating across 0-360
+    scada_ds=xr.Dataset({'ActivePower':scada_ds['WTUR.W'],
+                         'cos_yaw':np.cos(np.radians(scada_ds['WNAC.Dir'])),
+                         'sin_yaw':np.sin(np.radians(scada_ds['WNAC.Dir']))})
+
+    #irregular (1-7 s) logging interval: bin to a common 1-s grid across turbines and fill short gaps
+    scada_ds=scada_ds.resample(time='1s').mean().interpolate_na(dim='time',max_gap=np.timedelta64(limit_time,'s'))
+    scada_ds['yaw_offset']=Data_offset[serial]
+    scada_all.append(scada_ds.expand_dims(turbine=[turbine]))
+Data=xr.concat(scada_all,dim='turbine')
 
 #%% Plots
 cmap = cm.get_cmap("plasma")
@@ -109,13 +130,13 @@ for f in np.array(files_rad)[sel_plot]:
     
     #interpolate pressure data
     power_int=Data.ActivePower.interp(time=time_rad)
-    c_int=np.cos(np.radians(Data.Nacelle_Position.interp(time=time_rad)))
-    s_int=np.sin(np.radians(Data.Nacelle_Position.interp(time=time_rad)))
-    yaw_int=np.degrees(np.arctan2(s_int,c_int))+Data_offset['Northing Bias - 2022'].values
-    
+    c_int=Data.cos_yaw.interp(time=time_rad)
+    s_int=Data.sin_yaw.interp(time=time_rad)
+    yaw_int=np.degrees(np.arctan2(s_int,c_int))+Data.yaw_offset
+
     #plot
     pc=plt.pcolor((grid.x['data']+xy[0])/1000,(grid.y['data']+xy[1])/1000,Z,cmap='Grays',vmin=-10,vmax=50)
-    
+
     for tid in Data.turbine.values:
         x_tur=Turbines.x_utm.where(Turbines.name==tid,drop=True).values/1000
         y_tur=Turbines.y_utm.where(Turbines.name==tid,drop=True).values/1000
@@ -177,9 +198,9 @@ if make_video:
         
         #interpolate pressure data
         power_int=Data.ActivePower.interp(time=time_rad)
-        c_int=np.cos(np.radians(Data.Nacelle_Position.interp(time=time_rad)))
-        s_int=np.sin(np.radians(Data.Nacelle_Position.interp(time=time_rad)))
-        yaw_int=np.degrees(np.arctan2(s_int,c_int))+Data_offset['Northing Bias - 2022'].values
+        c_int=Data.cos_yaw.interp(time=time_rad)
+        s_int=Data.sin_yaw.interp(time=time_rad)
+        yaw_int=np.degrees(np.arctan2(s_int,c_int))+Data.yaw_offset
         
         #plot
         pc=plt.pcolor((grid.x['data']+xy[0])/1000,(grid.y['data']+xy[1])/1000,Z,cmap='Grays',vmin=-10,vmax=50)

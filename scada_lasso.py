@@ -6,6 +6,7 @@ import os
 cd=os.path.dirname(__file__)
 import numpy as np
 import xarray as xr
+import glob
 import matplotlib.dates as mdates
 import matplotlib
 from matplotlib import pyplot as plt
@@ -17,9 +18,12 @@ matplotlib.rcParams['savefig.dpi']=500
 plt.close("all")
 
 #%%Inputs
-source=os.path.join(cd,'data','20230805.100000.20230805.115959.scada.nc')
+source=os.path.join(cd,'data','awaken','kp.turbine.z02.b0','*20230805*nc')
 source_layout=os.path.join(cd,'data','20250225_AWAKEN_layout.nc')
 wf='King Plains'
+t_start='2023-08-05T10:00:00'
+t_end='2023-08-05T11:59:59'
+limit_time=10#[s] max gap filled by interpolation
 
 t1=0#initial timestep
 t2=7200#final timestep
@@ -91,7 +95,17 @@ def bilinear(x, y, a, b, c):
     return a + b*x + c*y 
 
 #%% Initialization
-Data=xr.open_dataset(source)
+time_grid=np.arange(np.datetime64(t_start,'ns'),np.datetime64(t_end,'ns')+np.timedelta64(1,'s'),np.timedelta64(1,'s'))
+scada_all=[]
+for file in sorted(glob.glob(source)):
+    scada_ds=xr.open_dataset(file).rename({'WTUR.DateTime':'time'})
+    turbine=scada_ds.attrs['Alias']
+    scada_ds=scada_ds[['WMET.HorWdSpd']].rename({'WMET.HorWdSpd':'WindSpeed'}).sel(time=slice(t_start,t_end))
+
+    #irregular (1-7 s) logging interval: bin to a common 1-s grid across turbines and fill short gaps
+    scada_ds=scada_ds.resample(time='1s').mean().reindex(time=time_grid).interpolate_na(dim='time',max_gap=np.timedelta64(limit_time,'s'))
+    scada_all.append(scada_ds.expand_dims(turbine=[turbine]))
+Data=xr.concat(scada_all,dim='turbine',combine_attrs='drop')
 Turbines=xr.open_dataset(source_layout,group='turbines').rename({'Wind plant':'wind_plant'})
 os.makedirs(os.path.join(cd,'figures','lasso'),exist_ok=True)
 
@@ -180,10 +194,10 @@ for i_t in time_sel:
 plt.figure(figsize=(18,6))
 ax=plt.subplot(3,1,1)
 plt.plot(time_all,A_all,'.-k')
-plt.ylabel(r'Amplitude [m s${-1}$]',rotation=85)
+plt.ylabel(r'Amplitude [m s$^{-1}$]',rotation=85)
 plt.yticks([0,.5,1.0,1.5,2.0])
 plt.gca().xaxis.set_major_formatter(mdates.DateFormatter('%H:%M'))
-plt.xlim([Data.time[0],Data.time[-1]])
+plt.xlim([Data.time[0]-np.timedelta64(10,'s'),Data.time[-1]+np.timedelta64(10,'s')])
 ax.set_xticklabels([])
 plt.grid()
 ax=plt.subplot(3,1,2)
@@ -191,14 +205,14 @@ plt.plot(time_all,lambda_all,'.-k')
 plt.yticks([0,5,10,15,20])
 plt.ylabel(r'Wavelength [km]',rotation=85)
 plt.gca().xaxis.set_major_formatter(mdates.DateFormatter('%H:%M'))
-plt.xlim([Data.time[0],Data.time[-1]])
+plt.xlim([Data.time[0]-np.timedelta64(10,'s'),Data.time[-1]+np.timedelta64(10,'s')])
 ax.set_xticklabels([])
 plt.grid()
 ax=plt.subplot(3,1,3)
 plt.quiver(time_all,np.zeros(len(time_all)),np.cos(np.radians(270-wd_all)),np.sin(np.radians(270-wd_all)),color='k',width=0.002)
 plt.xlabel('Time (UTC)')
 plt.gca().xaxis.set_major_formatter(mdates.DateFormatter('%H:%M'))
-plt.xlim([Data.time[0],Data.time[-1]])
+plt.xlim([Data.time[0]-np.timedelta64(10,'s'),Data.time[-1]+np.timedelta64(10,'s')])
 ax.set_yticks([])
 plt.grid()
 

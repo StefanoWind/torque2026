@@ -3,6 +3,7 @@
 Plot selected SCADA channels
 """
 import os
+import glob
 cd=os.path.dirname(__file__)
 import numpy as np
 import xarray as xr
@@ -11,7 +12,6 @@ from matplotlib import pyplot as plt
 import matplotlib.dates as mdates
 from matplotlib.path import Path
 import warnings
-import pandas as pd
 warnings.filterwarnings('ignore')
 matplotlib.rcParams['font.family'] = 'serif'
 matplotlib.rcParams['mathtext.fontset'] = 'cm'
@@ -20,7 +20,11 @@ matplotlib.rcParams['savefig.dpi']=500
 plt.close("all")
 
 #%%Inputs
-source=os.path.join(cd,'data','awaken','kp.turbine.z02.00')
+source=os.path.join(cd,'data','awaken','kp.turbine.z02.b0')
+t_start='2023-08-05T10:00:00'
+t_end='2023-08-05T11:59:59'
+var_names={'WMET.HorWdSpd':'WindSpeed','WTUR.W':'ActivePower','WNAC.Dir':'Nacelle_Position'}
+limit_time=10#[s] max gap filled by interpolation
 source_layout=os.path.join(cd,'data','20250225_AWAKEN_layout.nc')
 turbines_sel=['A09','I02','G09']
 U_cutin=3#[m/s] cutin wind speed
@@ -63,41 +67,17 @@ Data=xr.Dataset()
 #%% Main
 
 #read scada
-ctr=0
-for file in os.listdir(source):
-    scada_df=pd.read_csv(os.path.join(source,file))
-    scada_df=scada_df.rename(columns={scada_df.columns[0]: "time"}).set_index('time')
-    scada_df.index= pd.to_datetime(scada_df.index, utc=True).tz_convert(None)
-    
-    #extract turbine and variable list
-    if ctr==0:
-        _vars=[]
-        turbines=[]
-        for c in scada_df.columns:
-            if 'Turbine' in c:
-                tn=c.split('Turbine')[-1][:2]
-                turbines=np.append(turbines,'0'.join([tn[0],tn[1]]))
-                _vars=np.append(_vars,c.split('.')[-1])
-    turbines=np.unique(turbines)
-    _vars=np.unique(_vars)
-    
-    #build dataset
-    scada_ds=xr.Dataset()
-    for v in _vars:
-        data=np.zeros((len(scada_df.index),len(turbines)))
-        i_t=0
-        for t in turbines:
-            data[:,i_t]=scada_df[f'PKGP1HIST01.OKWF001_KP_Turbine{t[0]}{t[-1]}.{v}'].values
-            i_t+=1
-        scada_ds[v]=xr.DataArray(data,coords={'time':scada_df.index.values,'turbine':turbines})
-    
-    #stack
-    if 'time' not in Data.coords:
-        Data=scada_ds
-    else:
-        Data=xr.concat([Data,scada_ds],dim='time')
-        
-    ctr+=1
+scada_all=[]
+for file in sorted(glob.glob(os.path.join(source,'*.nc'))):
+    scada_ds=xr.open_dataset(file).rename({'WTUR.DateTime':'time'})
+    turbine=scada_ds.attrs['Alias']
+    scada_ds=scada_ds[list(var_names)].rename(var_names).sel(time=slice(t_start,t_end))
+
+    #irregular (1-7 s) logging interval: bin to a common 1-s grid across turbines and fill short gaps
+    scada_ds=scada_ds.resample(time='1s').mean().interpolate_na(dim='time',max_gap=np.timedelta64(limit_time,'s'))
+    scada_all.append(scada_ds.expand_dims(turbine=[turbine]))
+
+Data=xr.concat(scada_all,dim='turbine',combine_attrs='drop')
 dt=np.float64(np.mean(np.diff(Data.time.values)))/10**9
 
 #%% Output
@@ -124,7 +104,8 @@ for v in vars_sel:
         ax.set_xticklabels([])
     plt.grid()
     plt.ylabel(labels[v])
-    plt.xlim([Data.time[0],Data.time[-1]])
+    plt.xlim([Data.time[0],Data.time[-1]+np.timedelta64(10,'s')])
+    plt.xticks(np.arange(Data.time.values[0],Data.time.values[-1]+np.timedelta64(10,'s'),np.timedelta64(900,'s')))
     ctr+=1
 plt.xlabel('Time (UTC)')
 
@@ -145,7 +126,7 @@ for v in vars_sel2:
         # ax.set_xticklabels([])
     plt.grid()
     plt.ylabel(labels[v])
-    plt.xlim([Data.time[0],Data.time[-1]])
+    plt.xlim([Data.time[0],Data.time[-1]+np.timedelta64(1,'s')])
     ctr+=1
 plt.xlabel('Time (UTC)')
 

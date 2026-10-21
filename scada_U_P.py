@@ -21,17 +21,21 @@ matplotlib.rcParams['savefig.dpi']=500
 plt.close("all")
 
 #%%Inputs
-source=os.path.join(cd,'data','20230805.100000.20230805.115959.scada.nc')
-source_all=os.path.join(cd,'data','awaken','kp.turbine.z01.b0')
+source=os.path.join(cd,'data','awaken','kp.turbine.z02.b0')
+source_all=os.path.join(cd,'data','awaken','kp.turbine.z02.c0')
 source_met=os.path.join(cd,'data','awaken','sa1.met.z01.b0','*nc')
 turbine_id={'A09':'wt009','I02':'wt073','G09':'wt062'}
 turbines_sel=['A09','I02','G09']#selected turbines
+t_start='2023-08-05T10:00:00'
+t_end='2023-08-05T11:59:59'
+limit_time=10#[s] max gap filled by interpolation in high-frequency data
+min_flag=0.9#minimum fraction of valid samples in 10-min period
 
-U_rated=10#[m/s] rated wind speed
+U_rated=11#[m/s] rated wind speed
 P_rated=2800#[kW] rated power
 
 dt_ma=60#[s] moving average window
-R=287.05#[J/kgK] ais gas constant
+R=287.05#[J/kgK] air gas constant
 rho_ref=1.225#[kg/m^3] reference density
 bins_U=np.arange(0,26.5,0.5)/U_rated#bins in normalized wind speed
 min_grad=10**-3#minimum gradient in U,P
@@ -44,7 +48,7 @@ skip=20
 def preprocess(ds):
     return ds[["pressure","qc_pressure"]]   # keep only one variable
 
-#%% Main
+#%% Load data
 
 #read met data
 files_met=glob.glob(source_met)
@@ -58,22 +62,33 @@ dt_met=np.float64(np.mean(np.diff(Data_met.time.values)))/10**9
 p_met=Data_met.pressure.where(Data_met.qc_pressure==0).rolling(time=int(600/dt_met),center=True).mean()*1000
 print('Met data loaded')
 
-#read SCADA
-Data=xr.open_dataset(source)
+#read high-frequency SCADA
+scada_all=[]
+for tid in turbines_sel:
+    files=glob.glob(os.path.join(source,f'*{t_start[:10].replace("-","")}*'+turbine_id[tid]+'*'))
+    scada_ds=xr.open_mfdataset(files).rename({'WTUR.DateTime':'time'})
+    scada_ds=scada_ds[['WTUR.W','WMET.HorWdSpd','WMET.EnvTmp']].sel(time=slice(t_start,t_end)).compute()
+
+    #irregular (1-7 s) logging interval: bin to a common 1-s grid across turbines and fill short gaps
+    scada_ds=scada_ds.resample(time='1s').mean().interpolate_na(dim='time',max_gap=np.timedelta64(limit_time,'s'))
+    scada_all.append(scada_ds.expand_dims(turbine=[tid]))
+Data=xr.concat(scada_all,dim='turbine',combine_attrs='drop')
 dt=np.float64(np.mean(np.diff(Data.time.values)))/10**9
 p=p_met.interp(time=Data.time)
-T=Data.Temp_Ambient+273.15
+T=Data['WMET.EnvTmp']+273.15
 rho=p/(T*R)
-P=Data.ActivePower.rolling(time=int(dt_ma/dt),center=True).mean()/P_rated
-U=(Data.WindSpeed*(rho/rho_ref)**(1/3)/U_rated).rolling(time=int(dt_ma/dt),center=True).mean()
+P=Data['WTUR.W'].rolling(time=int(dt_ma/dt),center=True).mean()/P_rated
+U=(Data['WMET.HorWdSpd']*(rho/rho_ref)**(1/3)/U_rated).rolling(time=int(dt_ma/dt),center=True).mean()
+print('High-frequency SCADA loaded')
 
 #read all SCADA
 P_all={}
 U_all={}
 for tid in turbines_sel:
     files=glob.glob(os.path.join(source_all,'*'+turbine_id[tid]+'*'))
-    Data_all=xr.open_mfdataset(files)
-    Data_all=Data_all.rename_vars({'WTUR.DateTime':'time'})
+    print(f'{len(files)} files available for {tid}')
+    Data_all=xr.open_mfdataset(files).rename({'WTUR.DateTime':'time'})
+    Data_all=Data_all.where(Data_all['Total_Flag_10m_Percent']>=min_flag)
     p_all=p_met.interp(time=Data_all.time)
     T_all=Data_all['WMET.EnvTmp_10m_Avg']+273.15
     rho_all=p_all/(T_all*R)
@@ -81,7 +96,7 @@ for tid in turbines_sel:
     U_all[tid]=(Data_all['WMET.HorWdSpd_10m_Avg']*(rho_all/rho_ref)**(1/3)).compute()/U_rated
     print(f'Data of {tid} loaded')
 
-#Power curves
+#%% Power curves
 U_avg={}
 P_avg={}
 P_std={}
@@ -101,9 +116,6 @@ for tid in turbines_sel:
     
     print(f'Power curve of {tid} calculated excluding {np.sum(flat)} flat points')
 
-#average over three turbine
-U_avg_all = np.median(list(U_avg.values()), axis=0)
-P_avg_all =np.median(list(P_avg.values()), axis=0)
 
 #%% Plots
 plt.close('all')
@@ -114,7 +126,7 @@ fig=plt.figure(figsize=(18,5))
 gs = gridspec.GridSpec(1, len(turbines_sel)+1,width_ratios=[1]*len(turbines_sel)+[0.05])
 for tid in turbines_sel:
     ax=fig.add_subplot(gs[ctr])
-    plt.fill_between(U_avg_all,np.zeros(len(P_avg_all))-0.1, P_avg_all, color=(0,0,0,0.5))
+    plt.fill_between(U_avg[tid],np.zeros(len(P_avg[tid]))-0.1, P_avg[tid], color=(0,0,0,0.5))
     x=U.sel(turbine=tid).values
     y=P.sel(turbine=tid).values
     
@@ -132,7 +144,7 @@ for tid in turbines_sel:
     else:
         ax.set_yticklabels([])
     plt.grid()
-    plt.xlim([0,2.5])
+    plt.xlim([0,2.25])
     plt.ylim([-0.01,1.05])
     ctr+=1
 cax=fig.add_subplot(gs[-1])

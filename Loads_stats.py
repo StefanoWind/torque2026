@@ -24,23 +24,22 @@ plt.close('all')
 #%% Inputs
 source_loads=os.path.join(cd,'data/awaken/kp.turbine.z03.c0/*{turbine_id}.nc')
 source_scada=os.path.join(cd,'data/awaken/kp.turbine.z02.c0')
+source_yaw_off=os.path.join(cd,'data/awaken/kp.turbine.z04.c1/YwSptOff_{turbine_id_scada}.nc')
 turbine_id='e6'
 turbine_id_scada='wt041'#SCADA turbine id corresponding to turbine_id (Alias E06)
 loads_var=['tb_bend_foreaft_del','b1_bend_flap_root_del',
            'tb_bend_foreaft_max','b1_bend_flap_root_max']#c0 resultant DELs are all QC-flagged
 ws_var='WMET.HorWdSpd_10m_Avg'
 ti_var='WMET.HorWdSpd_10m_Std'
-yaw_spt_min_var='WYAW.YwSpt_10m_Min'
-yaw_spt_max_var='WYAW.YwSpt_10m_Max'
 wake_steering_start='2024-05-01'
 min_data_avail=0.25
 min_ti=1
 dws=1
 dti=2
-max_yaw_spt=1
-yaw_spt_missing=999#[deg] assigned to missing yaw setpoints after wake_steering_start so those bins are excluded
-ws_bins=np.arange(0,25,dws)
-ti_bins=np.append(np.arange(6,31,dti),100)
+max_yaw_off=1
+yaw_off_missing=999#[deg] assigned to missing yaw offsets after wake_steering_start so those bins are excluded
+ws_bins=np.arange(0,26,dws)
+ti_bins=np.concatenate([[0],np.arange(5,30,dti),[100]])
 load_bins=np.arange(0,1.31,0.1)
 
 max_ci_frac=0.1#max width of the bootstrap CI, as a fraction of the load's std
@@ -95,34 +94,29 @@ dates=pd.DatetimeIndex(np.unique(Loads.time.dt.floor('D').values))
 files_scada=[]
 for d in dates:
     files_scada+=glob.glob(os.path.join(source_scada,f'*{d.strftime("%Y%m%d")}*{turbine_id_scada}*nc'))
-scada_vars=[ws_var,ti_var,yaw_spt_min_var,yaw_spt_max_var]
+scada_vars=[ws_var,ti_var]
 
-def read_scada(f):
-    D=xr.open_dataset(f)
-    for v in [yaw_spt_min_var,yaw_spt_max_var]:
-        if v not in D:
-            D[v]=xr.full_like(D[ws_var],np.nan)#older files lack the yaw setpoint channels
-    return D[scada_vars].load()
-
-Scada=xr.concat([read_scada(f) for f in tqdm(sorted(files_scada),desc='Loading SCADA files')],dim='WTUR.DateTime')
+Scada=xr.concat([xr.open_dataset(f)[scada_vars].load() for f in tqdm(sorted(files_scada),desc='Loading SCADA files')],dim='WTUR.DateTime')
 Scada=Scada.rename({'WTUR.DateTime':'time'})
 Scada['time']=Scada.time+pd.Timedelta(minutes=5)#SCADA timestamps mark bin start, loads use bin centers
+
+Yaw_off=xr.open_dataset(source_yaw_off.format(turbine_id_scada=turbine_id_scada))#timestamps already at bin centers
 
 ws=Scada[ws_var]
 ti=Scada[ti_var]/Scada[ws_var]*100
 ti=ti.where(ti>min_ti)
 
-#exclude loads from 10-min bins with a nonzero yaw setpoint
-#missing setpoints (no file, no variable or NaN) are assumed 0 before wake steering started and excluded after
+#exclude loads from 10-min bins with a nonzero yaw setpoint offset
+#missing offsets are assumed 0 before wake steering started and excluded after
 after_ws_start=xr.DataArray(Loads.time.values>=np.datetime64(wake_steering_start),coords={'time':Loads.time.values})
-yaw_spt_fill=xr.where(after_ws_start,yaw_spt_missing,0)
-yaw_spt_min=Scada[yaw_spt_min_var].reindex(time=Loads.time.values)
-yaw_spt_max=Scada[yaw_spt_max_var].reindex(time=Loads.time.values)
-yaw_spt_isnan=yaw_spt_min.isnull()|yaw_spt_max.isnull()
-yaw_spt_min=yaw_spt_min.fillna(yaw_spt_fill)
-yaw_spt_max=yaw_spt_max.fillna(yaw_spt_fill)
-yaw_spt_exceed=(np.abs(yaw_spt_min)>max_yaw_spt)|(np.abs(yaw_spt_max)>max_yaw_spt)
-Loads=Loads.where(~yaw_spt_exceed)
+yaw_off_fill=xr.where(after_ws_start,yaw_off_missing,0)
+yaw_off_min=Yaw_off['min'].reindex(time=Loads.time.values)
+yaw_off_max=Yaw_off['max'].reindex(time=Loads.time.values)
+yaw_off_isnan=yaw_off_min.isnull()|yaw_off_max.isnull()
+yaw_off_min=yaw_off_min.fillna(yaw_off_fill)
+yaw_off_max=yaw_off_max.fillna(yaw_off_fill)
+yaw_off_exceed=(np.abs(yaw_off_min)>max_yaw_off)|(np.abs(yaw_off_max)>max_yaw_off)
+Loads=Loads.where(~yaw_off_exceed)
 
 #align wind speed onto the load time grid
 ws_aligned=ws.reindex(time=Loads.time.values).values
@@ -196,15 +190,20 @@ time_highlight=Loads.time.values[highlight]
 fig,ax=plt.subplots(2,2,figsize=(12,8),sharex=True)
 ax=ax.flatten()
 for i,v in enumerate(loads_var):
-    ax[i].plot(time_highlight,prob[v],'o-',color='#1b3a6b',markersize=14,label='$P$')
-    ax[i].plot(time_highlight,prob_cond[v],'o-',color='#d4a017',markersize=14,label='$P_{cond}$')
+    ax[i].plot(time_highlight,prob[v],'o-',color='#1b3a6b',markersize=12,label='$P(L>L_i)$')
+    ax[i].plot(time_highlight,prob_cond[v],'o-',color='orange',markersize=12,label='$P(L>L_i|U_h,TI_h)$')
     #sample count of the WS-TI bin shown inside the marker only where it is small
     for t,p,nt in zip(time_highlight,prob_cond[v],n_total_cond[v]):
         if np.isfinite(p) and nt<100:
-            ax[i].text(t,p,f'{nt:.0f}',ha='center',va='center',fontsize=9,color='k',fontweight='bold',zorder=10)
-    ax[i].set_ylim([0,1.1])
-    ax[1].set_yticks([0,0.25,0.5,0.75,1])
-    ax[i].set_ylabel(labels[v])
+            ax[i].text(t,p,f'{nt:.0f}',ha='center',va='center',fontsize=8,color='k',fontweight='bold',zorder=10)
+    #red-to-green background (low exceedance probability = extreme load), in axes coordinates so it spans the full plot
+    xlim=ax[i].get_xlim()
+    ax[i].imshow(np.linspace(0,1,256)[:,None],extent=[0,1,0,1],transform=ax[i].transAxes,origin='lower',
+                 aspect='auto',cmap='RdYlGn',alpha=0.3,zorder=0)
+    ax[i].set_xlim(xlim)
+    ax[i].set_ylim([-0.05,1.05])
+    ax[i].set_yticks([0,0.25,0.5,0.75,1])
+    ax[i].set_ylabel(f'Probability of exceedence for {labels[v]}')
     ax[i].grid(True)
     ax[i].xaxis.set_major_formatter(mdates.DateFormatter('%H:%M'))
 ax[0].legend()
@@ -216,44 +215,50 @@ plt.tight_layout()
 #% 3D PDF
 perc_levels=[0.05,0.1,0.2,0.5,1,2,5]#[%] probability levels shown as filled contour bands, increasing order
 levels=np.log10(np.array(perc_levels)/100)
-ti_high_plot=31#[%] TI plane where the open-ended last TI bin (pdf slice and trajectory points) is drawn
-ti_offset=np.append(ti_avg[:-1],ti_high_plot)
+#[%] TI planes where the open-ended first/last TI bins (pdf slices and trajectory points) are drawn, one bin spacing outside the inner bins
+ti_low_plot=ti_avg[1]-dti
+ti_high_plot=ti_avg[-2]+dti
+ti_offset=np.concatenate([[ti_low_plot],ti_avg[1:-1],[ti_high_plot]])
 
 for stat in ['del','max']:
     vars_stat=[v for v in loads_var if v.endswith(f'_{stat}')]
     fig=plt.figure(figsize=(18,10))
-    axs=[fig.add_subplot(1,len(vars_stat),j+1,projection='3d') for j in range(len(vars_stat))]
+    #automatic 3D depth sorting misorders the overlapping slices, so draw order is set explicitly via zorder
+    axs=[fig.add_subplot(1,len(vars_stat),j+1,projection='3d',computed_zorder=False) for j in range(len(vars_stat))]
 
     for ax,v in zip(axs,vars_stat):
         load=load_dict[v]
         pdf=pdf_3d[v]
 
-        #pdf slices stacked along the TI axis
+        #pdf slices stacked along the TI axis, low-TI slices (closest to the viewer) drawn last
         for k in range(len(ti_bins)-1):
+            z_slice=2*(len(ti_bins)-1-k)
             logP=np.ma.masked_invalid(np.log10(pdf[k]).T)#zero-density bins masked
-            cf=ax.contourf(logP,ws_avg,load_avg,zdir='x',offset=ti_offset[k],levels=levels,cmap='Greys',extend='max',alpha=0.5)
+            cf=ax.contourf(logP,ws_avg,load_avg,zdir='x',offset=ti_offset[k],levels=levels,cmap='Greys',extend='max',alpha=0.5,zorder=z_slice)
             ax.contour(    logP,ws_avg,load_avg,zdir='x',offset=ti_offset[k],levels=levels,
-                       extend='max',colors='k',linestyles='solid',zorder=11,linewidths=0.5)
+                       extend='max',colors='k',linestyles='solid',zorder=z_slice+1,linewidths=0.5)
 
         #highlight period plotted as a 3D (TI, WS, load) trajectory
         valid_traj=highlight&np.isfinite(ws_aligned)&np.isfinite(load.values)&np.isfinite(ti_aligned)
         ws_highlight=ws_aligned[valid_traj]
         load_highlight=load.values[valid_traj]
         ti_highlight=ti_aligned[valid_traj]
-        ti_highlight=np.where(ti_highlight>ti_bins[-2],ti_high_plot,ti_highlight)
+        ti_highlight=np.where(ti_highlight<ti_bins[1],ti_low_plot,ti_highlight)
+        ti_highlight=np.where(ti_highlight>=ti_bins[-2],ti_high_plot,ti_highlight)
         dtime_highlight=(Loads.time.values[valid_traj]-highlight_period[0])/np.timedelta64(1,'m')
-        ax.plot(ti_highlight,ws_highlight,load_highlight,color='k',linewidth=1,zorder=10)
+        ax.plot(ti_highlight,ws_highlight,load_highlight,color='k',linewidth=1,zorder=100)
         sc=ax.scatter(ti_highlight,ws_highlight,load_highlight,s=20,c=dtime_highlight,cmap='jet',vmin=0,vmax=120,
-                      zorder=11,alpha=1)
+                      zorder=101,alpha=1)
 
-        ax.set_xlim([ti_bins[0],ti_high_plot+1])
-        ax.set_xticks(np.append(np.arange(10,ti_bins[-2],5),ti_high_plot))
-        ax.set_xticklabels([f'{t:g}' for t in np.arange(10,ti_bins[-2],5)]+[f'>{ti_bins[-2]:g}'])
+        ti_ticks=np.arange(10,ti_bins[-2],5)
+        ax.set_xlim([ti_low_plot-1,ti_high_plot+1])
+        ax.set_xticks(np.concatenate([[ti_low_plot],ti_ticks,[ti_high_plot]]))
+        ax.set_xticklabels([f'<{ti_bins[1]:g}']+[f'{t:g}' for t in ti_ticks]+[f'>{ti_bins[-2]:g}'])
         ax.set_ylim([ws_bins[0],ws_bins[-1]])
         ax.set_zlim([load_bins[0],1.2])
         ax.set_box_aspect((2,1,1))#stretch the TI axis for readability
         ax.view_init(elev=40,azim=-140,roll=0)
-        ax.set_xlabel('TI [%]')
+        ax.set_xlabel(r'TI$_h$ [%]',labelpad=15)
         ax.set_ylabel('$U_h$ [m s$^{-1}$]')
         ax.set_zlabel(labels[v])
 
@@ -265,23 +270,23 @@ for stat in ['del','max']:
     # plt.savefig(os.path.join(cd,'figures/DEL_stats',f'{turbine_id}.{stat}.DEL_stats_3D.png'))
 
 
-# Yaw setpoint check
+# Yaw offset check
 time_all=Loads.time.values
-excluded_missing=(yaw_spt_exceed&yaw_spt_isnan&after_ws_start).values
-excluded_spt=(yaw_spt_exceed&~yaw_spt_isnan).values
+excluded_missing=(yaw_off_exceed&yaw_off_isnan&after_ws_start).values
+excluded_off=(yaw_off_exceed&~yaw_off_isnan).values
 
 fig,ax=plt.subplots(1,1,figsize=(14,5))
-ax.fill_between(time_all,0,1,where=excluded_spt,step='mid',color='r',alpha=0.3,linewidth=0,
-                transform=ax.get_xaxis_transform(),label=rf'Excluded ($|$yaw$_{{spt}}|>{max_yaw_spt}^\circ$)')
+ax.fill_between(time_all,0,1,where=excluded_off,step='mid',color='r',alpha=0.3,linewidth=0,
+                transform=ax.get_xaxis_transform(),label=rf'Excluded ($|$yaw$_{{off}}|>{max_yaw_off}^\circ$)')
 ax.fill_between(time_all,0,1,where=excluded_missing,step='mid',color='b',alpha=0.3,linewidth=0,
                 transform=ax.get_xaxis_transform(),label='Excluded (missing after wake steering start)')
-ax.plot(time_all,Scada[yaw_spt_max_var].reindex(time=time_all),'.k',markersize=1,label='Max yaw$_{spt}$')
-ax.plot(time_all,Scada[yaw_spt_min_var].reindex(time=time_all),'.g',markersize=1,label='Min yaw$_{spt}$')
+ax.plot(time_all,Yaw_off['max'].reindex(time=time_all),'.k',markersize=1,label='Max yaw$_{off}$')
+ax.plot(time_all,Yaw_off['min'].reindex(time=time_all),'.g',markersize=1,label='Min yaw$_{off}$')
 ax.axvline(np.datetime64(wake_steering_start),color='k',linestyle='--',label='Wake steering start')
 ax.set_xlim([time_all[0],time_all[-1]])
-ax.set_ylabel(r'Yaw setpoint [$^\circ$]')
+ax.set_ylabel(r'Yaw setpoint offset [$^\circ$]')
 ax.set_xlabel('Time (UTC)')
 ax.grid(True)
 ax.legend(markerscale=10)
 plt.tight_layout()
-# plt.savefig(os.path.join(cd,'figures/DEL_stats',f'{turbine_id}.yaw_spt_check.png'))
+# plt.savefig(os.path.join(cd,'figures/DEL_stats',f'{turbine_id}.yaw_off_check.png'))
