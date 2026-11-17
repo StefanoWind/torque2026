@@ -4,12 +4,17 @@
 """
 import os
 cd=os.path.dirname(__file__)
+import sys
 import glob
 import numpy as np
 import xarray as xr
 
 #%% Inputs
-source=os.path.join(cd,'data/awaken/kp.turbine.z04.b0')
+if len(sys.argv)==1:
+    source=os.path.join(cd,'data/awaken/kp.turbine.z04.b0')
+else:
+    source=sys.argv[1]
+    
 var='WYAW.YwSptOff'
 dt=600#[s] averaging window
 max_files=None#None to process all files

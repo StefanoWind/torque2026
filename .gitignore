@@ -14,4 +14,6 @@ __pycache__
 *.ar2v
 *.mdf
 *V06
+*mp4
+*tif
 build/
