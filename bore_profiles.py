@@ -12,6 +12,8 @@ import pandas as pd
 import matplotlib.gridspec as gridspec
 import matplotlib.dates as mdates
 import glob
+from scipy.interpolate import make_smoothing_spline
+from scipy.signal import butter, sosfiltfilt
 import warnings
 warnings.filterwarnings('ignore')
 matplotlib.rcParams['font.family'] = 'serif'
@@ -35,6 +37,15 @@ avg_time=10#[min] prebore period
 dt=15#[s] timestep
 sdate='2023-08-05T10:00:00'#start time
 edate='2023-08-05T12:00:00'#end time
+prebore=['2023-08-05T10:00:00','2023-08-05T10:20:00']
+g=9.81#[m/s^2] gravity acceleration
+lam_U=1000#smoothing penalty of spline fit of pre-bore U (None=GCV)
+max_height_fit_U=2000#[m] max height of spline fit of pre-bore U
+fluc_period=['2023-08-05T11:00:00','2023-08-05T11:20:00']#period for u', w' fluctuations
+band_period=[2,12]#[min] min/max wave period of band-pass filter
+order_filt=4#order of Butterworth filter
+min_valid_filt=0.8#minimum fraction of valid samples in time to band-pass a height
+
 met_height=2#[m] height of temperature measurements at AWAKEN
 
 #QC
@@ -76,6 +87,19 @@ def interp_nan(x,limit_height,limit_time):
             max_gap=np.timedelta64(limit_time,'s'))
         
     return x_inp
+
+def bandpass(x,band_period,dt,order,min_valid):
+    '''
+    Zero-phase Butterworth band-pass in time [Butterworth, 1930; Gustafsson, 1996]
+    '''
+    sos=butter(order,[1/(band_period[1]*60),1/(band_period[0]*60)],btype='bandpass',fs=1/dt,output='sos')
+
+    #the filter propagates any NaN to the whole series, so gaps are filled before filtering and re-masked after
+    valid=~np.isnan(x)
+    x_fill=x.interpolate_na(dim='time',method='linear').ffill(dim='time').bfill(dim='time')
+    x_filt=xr.apply_ufunc(lambda y: sosfiltfilt(sos,y,axis=-1),x_fill,input_core_dims=[['time']],output_core_dims=[['time']])
+
+    return x_filt.transpose(*x.dims).where(valid).where(valid.mean(dim='time')>=min_valid)
 
 #%% Initialization
 time=np.arange(np.datetime64(sdate),np.datetime64(edate)+np.timedelta64(dt,'s')/2,np.timedelta64(dt,'s'))
@@ -143,11 +167,11 @@ Data_met={}
 for s in sites:
     files_met=glob.glob(source_met.format(site=s))
     Data_met[s]=xr.open_mfdataset(files_met)
-    for v in Data_met[s].data_vars:
-        if f'qc_{v}' in Data_met[s].data_vars:
-            qc_met=Data_met[s][f'qc_{v}']==0
-            Data_met[s][v]=Data_met[s][v].where(qc_met)
-            print(f'{np.round(np.sum(qc_met).values/qc_met.size*100,1)}% in {v} retained after filter', flush=True)
+    for var in Data_met[s].data_vars:
+        if f'qc_{var}' in Data_met[s].data_vars:
+            qc_met=Data_met[s][f'qc_{var}']==0
+            Data_met[s][var]=Data_met[s][var].where(qc_met)
+            print(f'{np.round(np.sum(qc_met).values/qc_met.size*100,1)}% in {var} retained after filter', flush=True)
 
 #calculate theta difference
 for s in sites:
@@ -157,6 +181,32 @@ for s in sites:
 #read PBLH
 Data_blh=pd.read_csv(source_blh).set_index('Time [UTC]')
 Data_blh.index = Data_blh.index.astype('datetime64[ns]')
+
+
+#pre-bore profiles
+U_pre=Data_uvw.u.sel(time=slice(prebore[0],prebore[1])).mean(dim='time')
+V_pre=Data_uvw.v.sel(time=slice(prebore[0],prebore[1])).mean(dim='time')
+theta_pre=Data_trp.theta.sel(time=slice(prebore[0],prebore[1])).mean(dim='time')
+
+bore_direction=310
+C_bore=20 
+U_scorer=U_pre*np.cos(np.deg2rad(270-bore_direction))+V_pre*np.sin(np.deg2rad(270-bore_direction))
+N_scorer=(g/theta_pre*theta_pre.differentiate('height')).interp(height=U_scorer.height)
+
+#curvature from cubic smoothing spline with GCV penalty to avoid noise amplification of finite differences [Reinsch, 1967; Craven and Wahba, 1979]
+fit=~np.isnan(U_scorer)&(U_scorer.height<=max_height_fit_U)
+z_fit=U_scorer.height[fit]
+spl_U=make_smoothing_spline(z_fit.values,U_scorer[fit].values,lam=lam_U)
+d2U_dz_scorer=xr.DataArray(spl_U.derivative(2)(U_scorer.height.values),coords={'height':U_scorer.height}).where((U_scorer.height>=z_fit.min())&(U_scorer.height<=z_fit.max()))
+
+l_scorer=N_scorer/(U_scorer-C_bore)**2-d2U_dz_scorer/(U_scorer-C_bore)
+
+#wave fluctuations: along-bore u and w band-passed identically, padded by the longest period to limit filter edge effects
+pad=np.timedelta64(band_period[1]*60,'s')
+sel_pad=slice(np.datetime64(fluc_period[0])-pad,np.datetime64(fluc_period[1])+pad)
+u_bore=u*np.cos(np.deg2rad(270-bore_direction))+v*np.sin(np.deg2rad(270-bore_direction))
+u_fluc=u_bore.sel(time=sel_pad)-u_bore.sel(time=sel_pad).mean(dim='time')
+w_fluc=w.sel(time=sel_pad)-w.sel(time=sel_pad).mean(dim='time')
 
 #%% Plots
 plt.close('all')
@@ -289,4 +339,49 @@ plt.legend()
 plt.grid()
 plt.gca().xaxis.set_major_formatter(mdates.DateFormatter('%H:%M'))
 
+#pre-bore U along bore direction: raw vs spline fit
+plt.figure(figsize=(12,8))
+plt.subplot(1,2,1)
+plt.plot(U_scorer,U_scorer.height,'.-k',label='Raw')
+plt.plot(spl_U(z_fit.values),z_fit,'-r',linewidth=2,label='Smoothing spline')
+plt.axvline(C_bore,color='b',linestyle='--',label=r'$c$')
+plt.xlabel(r'$U$ along bore direction [m s$^{-1}$]')
+plt.ylabel(r'$z$ [m]')
+plt.ylim([0,max_height_fit_U])
+plt.legend()
+plt.grid()
+plt.tight_layout()
+
+#Scorer parameter
+plt.subplot(1,2,2)
+plt.plot(N_scorer/(U_scorer-C_bore)**2,l_scorer.height,'-b',label=r'$N^2/(U-c)^2$')
+plt.plot(-d2U_dz_scorer/(U_scorer-C_bore),l_scorer.height,'-r',label=r'$-U^{\prime\prime}/(U-c)$')
+plt.plot(l_scorer,l_scorer.height,'.-k',label=r'$l^2$')
+plt.axvline(0,color='gray',linestyle='--')
+plt.xlabel(r'$l^2$ [m$^{-2}$]')
+plt.ylabel(r'$z$ [m]')
+plt.ylim([0,max_height_fit_U])
+plt.legend()
+plt.grid()
+plt.tight_layout()
+
+#band-passed fluctuations
+fig=plt.figure(figsize=(18,7))
+gs = gridspec.GridSpec(2, 2, height_ratios=[1,1],width_ratios=[1,0.025])
+for i,(f,label) in enumerate(zip([u_fluc,w_fluc],[r"$u'$ [m s$^{-1}$]",r"$w'$ [m s$^{-1}$]"])):
+    ax=fig.add_subplot(gs[i,0])
+    ax.set_facecolor((0.9,0.9,0.9))
+    cf=plt.contourf(f.time,f.height,f.T,np.arange(-5*1.25,5.1*1.25,0.25),cmap='seismic',extend='both')
+    plt.contour(f.time,f.height,f.T,np.arange(-5,5.1*1.25,0.25),colors='k',linewidths=1,alpha=0.25,extend='both')
+    plt.gca().xaxis.set_major_formatter(mdates.DateFormatter('%H:%M'))
+    plt.ylabel(r'$z$ [m]')
+    plt.grid()
+    plt.ylim([0,2000])
+    if i==0:
+        ax.set_xticklabels([])
+    else:
+        plt.xlabel('Time (UTC)')
+    cax=fig.add_subplot(gs[i,1])
+    plt.colorbar(cf,cax=cax,label=label)
+plt.tight_layout()
 

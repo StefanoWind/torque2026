@@ -32,7 +32,7 @@ limit_time=10#[s] max gap filled by interpolation in high-frequency data
 min_flag=0.9#minimum fraction of valid samples in 10-min period
 
 U_rated=11#[m/s] rated wind speed
-P_rated=2800#[kW] rated power
+P_rated=2820#[kW] rated power
 
 dt_ma=60#[s] moving average window
 R=287.05#[J/kgK] air gas constant
@@ -88,7 +88,9 @@ for tid in turbines_sel:
     files=glob.glob(os.path.join(source_all,'*'+turbine_id[tid]+'*'))
     print(f'{len(files)} files available for {tid}')
     Data_all=xr.open_mfdataset(files).rename({'WTUR.DateTime':'time'})
-    Data_all=Data_all.where(Data_all['Total_Flag_10m_Percent']>=min_flag)
+    Data_all=Data_all.where(Data_all['BIN_Flag_10m_Percent']>=min_flag)
+    Data_all=Data_all.where(Data_all['PWR_Flag_10m_Percent']>=min_flag)
+    Data_all=Data_all.where(Data_all['Status_Flag_10m_Percent']>=min_flag)
     p_all=p_met.interp(time=Data_all.time)
     T_all=Data_all['WMET.EnvTmp_10m_Avg']+273.15
     rho_all=p_all/(T_all*R)
@@ -115,6 +117,7 @@ for tid in turbines_sel:
     P_avg[tid][U_avg[tid]>1.1]=1
     
     print(f'Power curve of {tid} calculated excluding {np.sum(flat)} flat points')
+    print(f'{np.sum(sel)} valid points used for power curve of {tid}')
 
 
 #%% Plots

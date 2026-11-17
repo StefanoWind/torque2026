@@ -10,6 +10,7 @@ import xarray as xr
 import glob
 import warnings
 from tqdm import tqdm
+import imageio
 from matplotlib import pyplot as plt
 import matplotlib.dates as mdates
 import matplotlib
@@ -45,6 +46,13 @@ load_bins=np.arange(0,1.31,0.1)
 max_ci_frac=0.1#max width of the bootstrap CI, as a fraction of the load's std
 
 highlight_period=[np.datetime64('2023-08-05T10:00:00'),np.datetime64('2023-08-05T12:00:00')]#datetimes highlighted in the scatter
+
+#video of the 3D pdfs rotating in azimuth: H264, 25 fps, 1024x576 (16:9, square pixel)
+make_video=True
+video_fps=25
+video_size=(1024,576)#[pixels]
+video_dpi=80
+video_azim=np.arange(0,360,1)#[deg]
 
 labels={'tb_bend_foreaft_del':r'DEL($M_{tb,fa}$)',
         'tb_bend_sideside_del':r'DEL($M_{tb,ss}$)',
@@ -170,7 +178,7 @@ for v in loads_var:
             sel_ws=(ws_aligned>ws_bins[i_ws])*(ws_aligned<=ws_bins[i_ws+1])
             sel_ti=(ti_aligned>ti_bins[i_ti])*(ti_aligned<=ti_bins[i_ti+1])
             
-            exceed=L>=L_sel
+            exceed=L>L_sel
             n_exceed[v][i]=     np.sum(exceed)
             n_total[v][i]=      np.sum(np.isfinite(L))
             n_exceed_cond[v][i]=np.sum(exceed[sel_ws*sel_ti])
@@ -268,6 +276,24 @@ for stat in ['del','max']:
     fig.colorbar(sc,ax=axs,label=f'Time since {str(highlight_period[0])[11:16]} UTC [min]',
                  location='bottom',pad=0.03,shrink=1,aspect=60,ticks=np.arange(0,121,30))
     # plt.savefig(os.path.join(cd,'figures/DEL_stats',f'{turbine_id}.{stat}.DEL_stats_3D.png'))
+
+    if make_video:
+        size_orig,dpi_orig=fig.get_size_inches(),fig.dpi
+        fig.set_dpi(video_dpi)
+        fig.set_size_inches(video_size[0]/video_dpi,video_size[1]/video_dpi)
+        with imageio.get_writer(os.path.join(cd,'figures/DEL_stats',f'{turbine_id}.{stat}.DEL_stats_3D.mp4'),
+                                fps=video_fps,codec='libx264',pixelformat='yuv420p',quality=8) as writer:
+            for azim in tqdm(video_azim,desc=f'Rendering {stat} video'):
+                for ax in axs:
+                    ax.view_init(elev=40,azim=azim,roll=0)
+                fig.canvas.draw()
+                frame=np.asarray(fig.canvas.buffer_rgba())[:,:,:3]
+                assert frame.shape[:2]==(video_size[1],video_size[0]), f'Frame size {frame.shape[1]}x{frame.shape[0]} differs from {video_size}'
+                writer.append_data(frame)
+        for ax in axs:
+            ax.view_init(elev=40,azim=-140,roll=0)
+        fig.set_dpi(dpi_orig)
+        fig.set_size_inches(size_orig)
 
 
 # Yaw offset check

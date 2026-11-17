@@ -28,17 +28,13 @@ source_rad=os.path.join(cd,'data','nexrad','*ar2v')
 source_layout=os.path.join(cd,'data','20250225_AWAKEN_layout.nc')
 source_offset=os.path.join(cd,'data','wd_offsets_Sept2025.csv')
 
-wf='King Plains'
 t_start='2023-08-05T10:00:00'
 t_end='2023-08-05T11:59:59'
 limit_time=10#[s] max gap filled by interpolation
 D=127#[m] rotor diameter
-t1=2000#initial timestep
-t2=4000#final timestep
-skip=300#skip timesteps
-power_rated=2800#[kW] rated power
-z_rad=100#[m] radar plane height a.g.l.
-time_shift_rad=120#[s] shift radar time
+power_rated=2820#[kW] rated power
+max_range_rad=100#[km] max radar range read
+levels_rad=np.arange(-10,51,5)#[dBZ] reflectivity contour levels
 
 make_video=False
 
@@ -74,9 +70,29 @@ def draw_turbine(x,y,D,wd,turbine_file,color=(255, 0, 0)):
     ax.imshow(img, transform=tr + ax.transData,zorder=10)
     plt.xlim(xlim)
     plt.ylim(ylim)
-    
+
+def read_lowest_tilt(file):
+    radar=pyart.io.read_nexrad_archive(file).extract_sweeps([0])
+
+    #filter bad data
+    gatefilter=pyart.filters.GateFilter(radar)
+    gatefilter.exclude_transition()
+    gatefilter.exclude_masked("reflectivity")
+
+    #gate-center locations along the curved beam, mapped to UTM through lat/lon
+    n_gates=np.sum(radar.range['data']<=max_range_rad*1000)
+    x,y,_=radar.get_gate_x_y_z(0)
+    lon,lat=pyart.core.cartesian_to_geographic_aeqd(x[:,:n_gates],y[:,:n_gates],
+                                                    radar.longitude['data'][0],radar.latitude['data'][0])
+    x_utm,y_utm,_,_=utm.from_latlon(lat,lon,force_zone_number=14)
+
+    Z=np.ma.masked_where(gatefilter.gate_excluded,radar.fields['reflectivity']['data'])[:,:n_gates]
+    #mid-sweep time of the lowest tilt
+    time_rad=np.datetime64(radar.time['units'][-20:-1])+np.timedelta64(int(np.round(np.mean(radar.time['data']))),'s')
+    return x_utm/1000,y_utm/1000,Z,time_rad
+
 #%% Initialization
-files_rad=glob.glob(source_rad)
+files_rad=sorted(glob.glob(source_rad))
 Turbines=xr.open_dataset(source_layout,group='turbines').rename({'Wind plant':'wind_plant'})
 Data_offset=pd.read_csv(source_offset).set_index('Turbine Serial Number')['Northing Bias - 2022']
 os.makedirs(os.path.join(cd,'figures','yaw'),exist_ok=True)
@@ -107,35 +123,17 @@ fig=plt.figure(figsize=(18,8))
 gs = gridspec.GridSpec(2, 3,height_ratios=[1,1],width_ratios=[1,1,0.05])
 for f in np.array(files_rad)[sel_plot]:
     ax=fig.add_subplot(gs[int(ctr/2),np.mod(ctr,2)])
-    radar = pyart.io.read_nexrad_archive(f)
-    
-    #filter bad data
-    gatefilter = pyart.filters.GateFilter(radar)
-    gatefilter.exclude_transition()
-    gatefilter.exclude_masked("reflectivity")
-    
-    #extract Cartesian slice
-    grid = pyart.map.grid_from_radars(
-        (radar,),
-        gatefilters=(gatefilter,),
-        grid_shape=(1, 241, 241),
-        grid_limits=((z_rad, z_rad),  (-100000.0, 0.0),(50000, 80000.0),),
-        fields=["reflectivity"],
-    )
-    
-    #time-space info
-    time_rad=np.timedelta64(time_shift_rad,'s')+np.datetime64(grid.time['units'][-20:])
-    Z=grid.fields['reflectivity']['data'].squeeze()
-    xy=utm.from_latlon(radar.latitude['data'],radar.longitude['data'])
-    
-    #interpolate pressure data
+    x_gate,y_gate,Z,time_rad=read_lowest_tilt(f)
+
+    #interpolate data
     power_int=Data.ActivePower.interp(time=time_rad)
     c_int=Data.cos_yaw.interp(time=time_rad)
     s_int=Data.sin_yaw.interp(time=time_rad)
     yaw_int=np.degrees(np.arctan2(s_int,c_int))+Data.yaw_offset
 
     #plot
-    pc=plt.pcolor((grid.x['data']+xy[0])/1000,(grid.y['data']+xy[1])/1000,Z,cmap='Grays',vmin=-10,vmax=50)
+    pc=plt.contourf(x_gate,y_gate,Z,levels=levels_rad,cmap='Grays',extend='both')
+    plt.contour(x_gate,y_gate,Z,levels=levels_rad,colors='k',linewidths=0.3,alpha=0.5)
 
     for tid in Data.turbine.values:
         x_tur=Turbines.x_utm.where(Turbines.name==tid,drop=True).values/1000
@@ -175,27 +173,8 @@ if make_video:
     ctr=0
     for f in files_rad:
         plt.figure(figsize=(16,6))
-        radar = pyart.io.read_nexrad_archive(f)
-        
-        #filter bad data
-        gatefilter = pyart.filters.GateFilter(radar)
-        gatefilter.exclude_transition()
-        gatefilter.exclude_masked("reflectivity")
-        
-        #extract Cartesian slice
-        grid = pyart.map.grid_from_radars(
-            (radar,),
-            gatefilters=(gatefilter,),
-            grid_shape=(1, 241, 241),
-            grid_limits=((z_rad, z_rad),  (-100000.0, 0.0),(50000, 80000.0),),
-            fields=["reflectivity"],
-        )
-        
-        #time-space info
-        time_rad=np.timedelta64(time_shift_rad,'s')+np.datetime64(grid.time['units'][-20:])
-        Z=grid.fields['reflectivity']['data'].squeeze()
-        xy=utm.from_latlon(radar.latitude['data'],radar.longitude['data'])
-        
+        x_gate,y_gate,Z,time_rad=read_lowest_tilt(f)
+
         #interpolate pressure data
         power_int=Data.ActivePower.interp(time=time_rad)
         c_int=Data.cos_yaw.interp(time=time_rad)
@@ -203,14 +182,18 @@ if make_video:
         yaw_int=np.degrees(np.arctan2(s_int,c_int))+Data.yaw_offset
         
         #plot
-        pc=plt.pcolor((grid.x['data']+xy[0])/1000,(grid.y['data']+xy[1])/1000,Z,cmap='Grays',vmin=-10,vmax=50)
+        pc=plt.contourf(x_gate,y_gate,Z,levels=levels_rad,cmap='Grays',extend='both')
+        plt.contour(x_gate,y_gate,Z,levels=levels_rad,colors='k',linewidths=0.3,alpha=0.5)
         
         for tid in Data.turbine.values:
             x_tur=Turbines.x_utm.where(Turbines.name==tid,drop=True).values/1000
             y_tur=Turbines.y_utm.where(Turbines.name==tid,drop=True).values/1000
             yaw=yaw_int.sel(turbine=tid).values
             power=power_int.sel(turbine=tid).values
-            color=[int(c*255) for c in cmap(power/power_rated)[:-1]]
+            if power/power_rated>0.01:
+                color=[int(c*255) for c in cmap(power/power_rated)[:-1]]
+            else:
+                color=[250,0,0]
             draw_turbine(x_tur, y_tur, D/100, yaw, os.path.join(cd,'figures','Turbine.png'),color)
        
         plt.gca().set_aspect('equal')

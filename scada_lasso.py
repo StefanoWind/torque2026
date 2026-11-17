@@ -20,7 +20,7 @@ plt.close("all")
 #%%Inputs
 source=os.path.join(cd,'data','awaken','kp.turbine.z02.b0','*20230805*nc')
 source_layout=os.path.join(cd,'data','20250225_AWAKEN_layout.nc')
-wf='King Plains'
+
 t_start='2023-08-05T10:00:00'
 t_end='2023-08-05T11:59:59'
 limit_time=10#[s] max gap filled by interpolation
@@ -87,7 +87,7 @@ def lasso(x,y,f,k_search,theta_search,N_grid=100,margin=0):
     f_dom=A[i,j]*np.cos(k_dom*(np.cos(theta_dom)*X+np.sin(theta_dom)*Y)+phi[i,j])
     
     #rmse of dominant mode
-    rmse=np.sum((f-A[i,j]*np.cos(k_dom*(np.cos(theta_dom)*x+np.sin(theta_dom)*y)+phi[i,j]))**2)**0.5
+    rmse=np.nanmean((f-A[i,j]*np.cos(k_dom*(np.cos(theta_dom)*x+np.sin(theta_dom)*y)+phi[i,j]))**2)**0.5
     
     return A, phi, k_dom, theta_dom, X, Y, f_dom, rmse
 
@@ -138,15 +138,15 @@ for i_t in time_sel:
     f=ws.isel(time=i_t).values
     sel=(f>min_f)*(f<max_f)
     
-    if np.sum(sel)>0:
+    if np.sum(sel)>=3:
         
         #detrend
-        A = np.column_stack([
+        matrix = np.column_stack([
             np.ones_like(x[sel]),   
             x[sel],                
             y[sel]]) 
             
-        coeffs, *_ = np.linalg.lstsq(A, f[sel], rcond=None)
+        coeffs, *_ = np.linalg.lstsq(matrix, f[sel], rcond=None)
         a, b, c = coeffs
         
         df=f[sel]-bilinear(x[sel], y[sel], a, b, c)
@@ -176,7 +176,7 @@ for i_t in time_sel:
         plt.plot(np.radians(wd_dom),lambda_dom,'xg')
         ax.set_theta_zero_location('N')
         ax.set_theta_direction(-1)
-        plt.title(r'$\lambda='+str(np.round(2*np.pi/k_dom,1))+r'$ km, $\theta='+str(np.round((270-np.degrees(theta_dom))%360))+'^\circ$')
+        plt.title(r'$\lambda='+str(np.round(2*np.pi/k_dom,1))+r'$ km, $\phi='+str(np.round((270-np.degrees(theta_dom))%360))+'^\circ$')
         plt.colorbar(pcm,label="Amplitude")
         plt.show()
         
